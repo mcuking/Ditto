@@ -14,37 +14,9 @@
 // 对于多字节的第 1 个字节的标记位如此设计原因：1 的个数表示一共有几个字节，0 用来区分标记位的 1 和数据位的 1
 // 对于多字节的低位字节的标记位如此设计原因：标记位 10 用来和 ASCII 码作区分，以及和第 1 个字节作区分（第 1 个字节不可能是 10 开头）
 
-// 返回 value 按照 UTF-8 编码后的字节数
-// 原理：根据 UTF-8 不同字节数的编码所能表示的范围和 value 进行比较
-uint32_t getByteNumOfEncodeUtf8(int value)
-{
-    ASSERT(value > 0, "Can't encode negative value!");
-
-    if (value <= 0x7f)
-    {
-        return 1;
-    }
-    else if (value <= 0x7ff)
-    {
-        return 2;
-    }
-    else if (value <= 0xffff)
-    {
-        return 3;
-    }
-    else if (value <= 0x10ffff)
-    {
-        return 4;
-    }
-    else
-    {
-        return 0; // 超出范围返回 0
-    }
-}
-
-// 返回 UTF-8 解码的字节数，参数 byte 是 UTF-8 编码的高字节
+// 计算已经 UTF-8 编码的字符的 UTF-8 编码字节数，其中参数 byte 是 UTF-8 编码的高字节
 // 原理：判断 UTF-8 高字节的标记位中 1 的个数，有几个 1 就表示有几个字节
-uint32_t getByteNumOfDecodeUtf8(uint8_t byte)
+uint32_t getByteNumOfEncodeUtf8(uint8_t byte)
 {
     if ((byte & 0xc0) == 0x80)
     {
@@ -70,6 +42,34 @@ uint32_t getByteNumOfDecodeUtf8(uint8_t byte)
     {
         // 最后就是单字节 UTF-8，等价于 ASCII 码
         return 1;
+    }
+}
+
+// 计算没有 UTF-8 编码的字符的 UTF-8 编码字节数
+// 原理：根据 UTF-8 不同字节数的编码所能表示的范围和 value 进行比较
+uint32_t getByteNumOfDecodeUtf8(int value)
+{
+    ASSERT(value > 0, "Can't encode negative value!");
+
+    if (value <= 0x7f)
+    {
+        return 1;
+    }
+    else if (value <= 0x7ff)
+    {
+        return 2;
+    }
+    else if (value <= 0xffff)
+    {
+        return 3;
+    }
+    else if (value <= 0x10ffff)
+    {
+        return 4;
+    }
+    else
+    {
+        return 0; // 超出范围返回 0
     }
 }
 
