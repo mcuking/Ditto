@@ -38,7 +38,7 @@ struct keywordToken keywordsToken[] = {
 // 判断以 start 开头，长度为 length 的单词是否是关键字，然后返回相应的 TokenType
 static TokenType keywordOrId(const *start, uint32_t length)
 {
-    int idx = 0;
+    uint32_t idx = 0;
     while (keywordsToken[idx].keyword != NULL)
     {
         // 遍历关键字 Token 数组，查看和 start 开头，长度为 length 的单词是否相同
@@ -119,4 +119,61 @@ static void lexKeyword(Lexer *lexer, TokenType type)
     {
         lexer->curToken.type = type;
     }
+}
+
+// 词法分析 unicode 码点
+// 前置知识：
+// unicode 码点是 4 个十六进制数字，比如 “字” 的码点就是 0x5B57
+// 为了和数字区分，用转义字符 \u 做前缀，即 \u5B57
+// 该函数将 unicode 码点按照 UTF-8 编码然后写入制定缓冲区 buf 中
+static void lexUnicodeCodePoint(Lexer *lexer, ByteBuffer *buf)
+{
+    int value = 0;
+    uint32_t idx = 0;
+    uint8_t digit = 0;
+
+    // 循环的过程就是将十六进制转成十进制
+    // 例如将 \u5B57 中的 5B57（十六进制）转成十进制 23383 (十进制)
+    while (idx < 4)
+    {
+        scanNextChar(lexer);
+
+        // 先获取每一位数，然后转成十进制的数
+        if (lexer->curChar == '\0')
+        {
+            LEX_ERROR(lexer, "unterminated unicode!");
+        }
+
+        if (lexer->curChar >= '0' && lexer->curChar <= '9')
+        {
+            digit = lexer->curChar - '0';
+        }
+        else if (lexer->curChar >= 'a' && lexer->curChar <= 'f')
+        {
+            digit = lexer->curChar - 'a' + 10;
+        }
+        else if (lexer->curChar >= 'A' && lexer->curChar <= 'F')
+        {
+            digit = lexer->curChar - 'A' + 10;
+        }
+        else
+        {
+            LEX_ERROR(lexer, "invalid unicode!");
+        }
+        // 将每一位的值转换成十进制后，累积到 value 中
+        value = value * 16 | digit;
+        idx++;
+    }
+
+    // 根据转换成十进制的数值 value，计算其如果用 UTF-8 表示时，需要几个字节
+    uint32_t byteNum = getByteNumOfDecodeUtf8(value);
+    ASSERT(byteNum != 0, "utf8 encode byte number should be between 1 and 4");
+
+    // 在真正将 value 写入 buf 之前，先写入 byteNum 个 0，以确保事先有 byteNum 个空间
+    // 因为 encodeUtf8 方法中是直接将每个字节写入到 buf 中的，例如 *buf = value & 0x7f
+    // 并不是调用 ByteBufferAdd 方法，因如果空间不足，则无法为 buf 自动扩容
+    ByteBufferFillWrite(lexer->vm, buf, 0, byteNum);
+
+    // 将十进制 value 进行 UTF-8 编码，然后写入指定缓冲区 buf
+    encodeUtf8(buf->datas + buf->count - byteNum, value);
 }
