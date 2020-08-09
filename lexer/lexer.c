@@ -36,7 +36,7 @@ struct keywordToken keywordsToken[] = {
     {NULL, 0, TOKEN_UNKNOWN}};
 
 // 判断以 start 开头，长度为 length 的单词是否是关键字，然后返回相应的 TokenType
-static TokenType isKeyword(const *start, uint32_t length)
+static TokenType keywordOrId(const *start, uint32_t length)
 {
     int idx = 0;
     while (keywordsToken[idx].keyword != NULL)
@@ -62,7 +62,7 @@ static char getNextChar(Lexer *lexer)
 }
 
 // 用于更新词法分析器所指向的字符，读进下一个字符
-static void moveToNextChar(Lexer *lexer)
+static void scanNextChar(Lexer *lexer)
 {
     // 将 nextCharPtr 所指的字符赋给 curChar
     lexer->curChar = *lexer->nextCharPtr;
@@ -76,7 +76,7 @@ static bool matchNextChar(Lexer *lexer, char expectedChar)
 {
     if (getNextChar(lexer) == expectedChar)
     {
-        moveToNextChar(lexer);
+        scanNextChar(lexer);
         return true;
     }
     return false;
@@ -91,6 +91,32 @@ static void skipBlanks(Lexer *lexer)
         {
             lexer->curToken.lineNo++;
         }
-        moveToNextChar(lexer);
+        scanNextChar(lexer);
+    }
+}
+
+// 词法分析关键字
+static void lexKeyword(Lexer *lexer, TokenType type)
+{
+    // 判断当前字符 curChar 是否是字母/数字/_，如果是则继续读下个字符
+    while (isalnum(lexer->curChar) || lexer->curChar == '_')
+    {
+        scanNextChar(lexer);
+    }
+
+    // 将指向下一个字符地址的 nextCharPtr 值减去 curToken 的 start 再减去 1（nextCharPtr 所指的字符不满足条件），即可得到当前读进的字符数
+    // 注意 curToken 是调用本函数的函数，在调用本函数之前已经设置好的
+    uint32_t length = (uint32_t)(lexer->nextCharPtr - lexer->curToken.start - 1);
+
+    lexer->curToken.length = length;
+
+    if (type == TOKEN_UNKNOWN)
+    {
+        // 如果 token 类型未知，则可以通过 keywordOrId 查找该单词对应的 token type
+        lexer->curToken.type = keywordOrId(lexer->curToken.start, length);
+    }
+    else
+    {
+        lexer->curToken.type = type;
     }
 }
