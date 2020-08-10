@@ -177,3 +177,106 @@ static void lexUnicodeCodePoint(Lexer *lexer, ByteBuffer *buf)
     // 将十进制 value 进行 UTF-8 编码，然后写入指定缓冲区 buf
     encodeUtf8(buf->datas + buf->count - byteNum, value);
 }
+
+// 词法分析字符串
+static void lexString(Lexer *lexer)
+{
+    ByteBuffer str;
+    ByteBufferInit(&str);
+
+    while (true)
+    {
+        // 循环扫描下一个字符
+        scanNextChar(lexer);
+
+        // 如果在遇到右双引号 “"” 之前遇到字符串结束符 \0，说明字符串是不完整的
+        if (lexer->curChar == '\0')
+        {
+            LEX_ERROR(lexer, "unterminated string!");
+        }
+
+        // 如果遇到了右双引号 “"”，则说明字符串已结束，跳出循环
+        if (lexer->curChar == '"')
+        {
+            lexer->curToken.type = TOKEN_STRING;
+            break;
+        }
+
+        // 如果遇到了 % 说明可能是内嵌表达式
+        // 即 %(表达式) ，其中括号里相当于一段代码，类似 JS 中的 eval 方法
+        // % 不能单独使用
+        // 以上为该脚本语言定义的语法
+        if (lexer->curChar == '%')
+        {
+            // 如果 % 后面没有根 ( 则报错
+            if (!matchNextChar(lexer, '('))
+            {
+                LEX_ERROR(lexer, "'%' should followed by '('!");
+            }
+
+            // 一般遇到 %，interpolationExpectRightParenNum 会赋值 1
+            // 如果下一次循环中 interpolationExpectRightParenNum 为 1
+            // 说明之前的循环中已经遇到了 1，则说明由多个 %
+            // 即内嵌表达式会嵌套使用，则报错提示不支持嵌套使用内嵌表达式
+            if (lexer->interpolationExpectRightParenNum > 0)
+            {
+                COMPILE_ERROR(lexer, "Don't support nest interpolate expression!");
+            }
+
+            lexer->interpolationExpectRightParenNum = 1;
+            lexer->curToken.type = TOKEN_INTERPOLATION;
+            break;
+        }
+
+        // 当遇到 \ 说明可能遇到了转义字符，例如 \n，所以读取下个字符进一步确认
+        // 之所以判断条件中是 '\\'，则是在 C 语言中也需要转义字符
+        if (lexer->curChar == '\\')
+        {
+            scanNextChar(lexer);
+            switch (lexer->curChar)
+            {
+            case '0':
+                ByteBufferAdd(lexer->vm, &str, '\0');
+                break;
+            case 'a':
+                ByteBufferAdd(lexer->vm, &str, '\a');
+                break;
+            case 'b':
+                ByteBufferAdd(lexer->vm, &str, '\b');
+                break;
+            case 'f':
+                ByteBufferAdd(lexer->vm, &str, '\f');
+                break;
+            case 'n':
+                ByteBufferAdd(lexer->vm, &str, '\n');
+                break;
+            case 'r':
+                ByteBufferAdd(lexer->vm, &str, '\r');
+                break;
+            case 't':
+                ByteBufferAdd(lexer->vm, &str, '\t');
+                break;
+            case 'u':
+                // 如果是 \u 说明是 unicode 码点
+                // 则使用 lexUnicodeCodePoint 处理其后面的 4 个十六进制数字
+                lexUnicodeCodePoint(lexer, &str);
+                break;
+            case '"':
+                ByteBufferAdd(lexer->vm, &str, '"');
+                break;
+            case '\\':
+                ByteBufferAdd(lexer->vm, &str, '\\');
+                break;
+            default:
+                LEX_ERROR(lexer, "unsupport eacape \\%c", lexer->curChar);
+                break;
+            }
+        }
+        else
+        {
+            // 如果不是转义字符，仅是普通字符，则直接写入
+            ByteBufferAdd(lexer->vm, &str, lexer->curChar);
+        }
+    }
+    ByteBufferClear(lexer->vm, &str);
+}
