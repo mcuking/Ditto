@@ -95,6 +95,22 @@ static void skipBlanks(Lexer *lexer)
     }
 }
 
+// 跳过一行
+static void skipOneLine(Lexer *lexer)
+{
+    getNextChar(lexer);
+    while (lexer->curChar != '\0')
+    {
+        if (lexer->curChar == '\n')
+        {
+            lexer->curToken.lineNo++;
+            getNextChar(lexer);
+            break;
+        }
+        getNextChar(lexer);
+    }
+}
+
 // 词法分析关键字
 static void lexKeyword(Lexer *lexer, TokenType type)
 {
@@ -279,4 +295,55 @@ static void lexString(Lexer *lexer)
         }
     }
     ByteBufferClear(lexer->vm, &str);
+}
+
+// 跳过行注释和区块注释
+static void skipComment(Lexer *lexer)
+{
+    char nextChar = getNextChar(lexer);
+    if (lexer->curChar == '/')
+    {
+        // 行注释
+        skipOneLine(lexer);
+    }
+    else
+    {
+        // 区块注释
+        // TODO: 该逻辑可能有 bug，当在注释中有 * 作为注释的内容时，
+        // 不应该简单的跳出循环，然后判断下一个字符是不是 /
+        // 后续完善
+        while (nextChar != '*' && nextChar != '\0')
+        {
+            // 不停地读入注释中下一个字符
+            scanNextChar(lexer);
+
+            // 如果注释有换行，则更新 lineNo
+            // 主要是为了当某段代码报错时，能准确报出出错行数
+            if (lexer->curChar == '\n')
+            {
+                lexer->curToken.lineNo++;
+            }
+            // 获取下一个字符，用作下一个循环的判断
+            nextChar = getNextChar(lexer);
+        }
+
+        // 循环退出后，下一个字符要么是 * 要么是 \0
+        // 如果下一个字符是 *，再判断下下个字符是不是 /
+        // 如果是，则说明注释结束，读取下个字符
+        if (matchNextChar(lexer, '*'))
+        {
+            if (!matchNextChar(lexer, '/'))
+            {
+                LEX_ERROR(lexer, "expect '/' after '*'!");
+            }
+            scanNextChar(lexer);
+        }
+        else
+        {
+            // 如果下一个字符是 \0，则报错
+            LEX_ERROR(lexer, "expect '*/' before comment end!");
+        };
+    }
+    // 注释之后可能会有空白符
+    skipBlanks(lexer);
 }
