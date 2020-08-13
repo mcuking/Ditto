@@ -519,3 +519,54 @@ void getNextToken(Lexer *lexer)
         return;
     }
 }
+
+// 如果当前 token 类型为期望类型，则读如下一个 token 并返回 true
+// 否则直接返回 false
+bool matchToken(Lexer *lexer, TokenType expectTokenType)
+{
+    if (lexer->curToken.type == expectTokenType)
+    {
+        getNextToken(lexer);
+        return true;
+    }
+    return false;
+}
+
+// 断言当前 token 类型为期望类型，并读取下一个 token，否则报错
+void assertCurToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg)
+{
+    if (lexer->curToken.type != expectTokenType)
+    {
+        COMPILE_ERROR(lexer, errMsg);
+    }
+    getNextToken(lexer);
+}
+
+// 断言下一个 token 类型为期望类型，否则报错
+void assertNextToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg)
+{
+    getNextToken(lexer);
+    if (lexer->curToken.type != expectTokenType)
+    {
+        COMPILE_ERROR(lexer, errMsg);
+    }
+}
+
+// 初始化词法分析器
+void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode)
+{
+    lexer->vm = vm;
+    // 由于 sourceCode 未必源自文件
+    // 当源码是直接输入的，则 file 只是个字符串
+    lexer->file = file;
+    // sourceCode 本身就是源码串中首字符地址
+    lexer->sourceCode = sourceCode;
+    lexer->curChar = *sourceCode;
+    lexer->nextCharPtr = sourceCode + 1;
+    lexer->curToken.start = NULL;
+    lexer->curToken.length = 0;
+    lexer->curToken.lineNo = 1;
+    lexer->curToken.type = TOKEN_UNKNOWN;
+    lexer->preToken = lexer->curToken;
+    lexer->interpolationExpectRightParenNum = 0;
+}
