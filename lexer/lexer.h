@@ -109,4 +109,23 @@ struct lexer
     VM *vm; // 表示该 lexer 属于那个 vm
 };
 
+// 用于获取下一个字符的内容
+char getNextChar(Lexer *lexer);
+
+// 获取 Token 方法
+void getNextToken(Lexer *lexer);
+
+// 如果当前 token 类型为期望类型，则读如下一个 token 并返回 true
+// 否则直接返回 false
+bool matchToken(Lexer *lexer, TokenType expectTokenType);
+
+// 断言当前 token 类型为期望类型，并读取下一个 token，否则报错
+void assertCurToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg);
+
+// 断言下一个 token 类型为期望类型，否则报错
+void assertNextToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg);
+
+// 初始化词法分析器
+void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode);
+
 #endif
