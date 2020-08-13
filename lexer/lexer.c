@@ -347,3 +347,175 @@ static void skipComment(Lexer *lexer)
     // 注释之后可能会有空白符
     skipBlanks(lexer);
 }
+
+// 获取 Token 方法
+void getNextToken(Lexer *lexer)
+{
+    // 将 curToken 备份到 preToken
+    lexer->preToken = lexer->curToken;
+    // 跳过待识别单词之前的空格
+    skipBlanks(lexer);
+    // 初始化 curToken
+
+    // 默认为文件结束类型 TOKEN_EOF
+    lexer->curToken.type = TOKEN_EOF;
+    lexer->curToken.length = 0;
+    // 将下一个字符的地址减 1 即是当前字符地址，也就是 curToken 开始地址
+    lexer->curToken.start = lexer->nextCharPtr - 1;
+
+    // 因词法分析器并不采用有限状态机，所以并不需要循环
+    // 之所以这里有循环，是因为如果解析碰到注释，没有循环的话，本次函数调用无法获得一个正常的 Token
+    // 所以需要继续循环，直到碰到非注释的 Token
+    while (lexer->curChar != '\0')
+    {
+        switch (lexer->curChar)
+        {
+        case ',':
+            lexer->curToken.type = TOKEN_COMMA;
+            break;
+        case ':':
+            lexer->curToken.type = TOKEN_COLON;
+            break;
+        case '[':
+            lexer->curToken.type = TOKEN_LEFT_BRACKET;
+            break;
+        case ']':
+            lexer->curToken.type = TOKEN_RIGHT_BRACKET;
+            break;
+        case '{':
+            lexer->curToken.type = TOKEN_LEFT_BRACE;
+            break;
+        case '}':
+            lexer->curToken.type = TOKEN_RIGHT_BRACE;
+            break;
+        case '.':
+            // .. 用于便是范围，例如 1 2 3 4  可以用 1..4 表示
+            lexer->curToken.type = matchNextChar(lexer, '.') ? TOKEN_DOT_DOT : TOKEN_DOT;
+            break;
+        case '=':
+            lexer->curToken.type = matchNextChar(lexer, '=') ? TOKEN_EQUAL : TOKEN_ASSIGN;
+            break;
+        case '+':
+            lexer->curToken.type = TOKEN_ADD;
+            break;
+        case '-':
+            lexer->curToken.type = TOKEN_SUB;
+            break;
+        case '*':
+            lexer->curToken.type = TOKEN_MUL;
+            break;
+        case '%':
+            lexer->curToken.type = TOKEN_MOD;
+            break;
+        case '/':
+            if (matchNextChar(lexer, '/') || matchNextChar(lexer, '*'))
+            {
+                // 如果是注释，则调用跳过注释函数
+                skipComment(lexer);
+                // 跳过注释后，重置 curToken 的起始地址
+                lexer->curToken.start = lexer->nextCharPtr - 1;
+                // 开始下一个循环，不会执行下面的逻辑
+                // 直到匹配到非注释的正常 TOKEN
+                continue;
+            }
+            else
+            {
+                lexer->curToken.type = TOKEN_DIV;
+            }
+            break;
+        case '&':
+            lexer->curToken.type = matchNextChar(lexer, '&') ? TOKEN_LOGIC_AND : TOKEN_BIT_AND;
+            break;
+        case '|':
+            lexer->curToken.type = matchNextChar(lexer, '|') ? TOKEN_LOGIC_OR : TOKEN_BIT_OR;
+            break;
+        case '~':
+            lexer->curToken.type = TOKEN_BIT_NOT;
+            break;
+        case '?':
+            lexer->curToken.type = TOKEN_QUESTION;
+            break;
+        case '!':
+            lexer->curToken.type = matchNextChar(lexer, '=') ? TOKEN_NOT_EQUAL : TOKEN_LOGIC_NOT;
+            break;
+        case '<':
+            if (matchNextChar(lexer, '='))
+            {
+                lexer->curToken.type = TOKEN_LESS_EQUAL;
+            }
+            else if (matchNextChar(lexer, '<'))
+            {
+                lexer->curToken.type = TOKEN_BIT_SHIFT_LEFT;
+            }
+            else
+            {
+                lexer->curToken.type = TOKEN_LESS;
+            }
+            break;
+        case '>':
+            if (matchNextChar(lexer, '='))
+            {
+                lexer->curToken.type = TOKEN_GREATE_EQUAL;
+            }
+            else if (matchNextChar(lexer, '>'))
+            {
+                lexer->curToken.type = TOKEN_BIT_SHIFT_RIGHT;
+            }
+            else
+            {
+                lexer->curToken.type = TOKEN_GREATE;
+            }
+            break;
+        case '"':
+            // 遇到 " 字符，则调用解析字符串的函数 lexString
+            lexString(lexer);
+            break;
+        case '(':
+            // 如果 interpolationExpectRightParenNum 大于 0，说明遇到了内嵌表达式
+            // 即以 % 开头的 %()
+            // 因为不支持嵌套使用内嵌表达式
+            // 则 interpolationExpectRightParenNum 加 1，用来后面判断内嵌表达式是否嵌套
+            // 判断的具体代码在 lexString 中
+            if (lexer->interpolationExpectRightParenNum > 0)
+            {
+                lexer->interpolationExpectRightParenNum++;
+            }
+            lexer->curToken.type = TOKEN_LEFT_PAREN;
+            break;
+        case ')':
+            if (lexer->interpolationExpectRightParenNum > 0)
+            {
+                // 如果 interpolationExpectRightParenNum 大于 0
+                // 说明之前已经遇到了 %(，因此当 ) 出现后，说明已经完结
+                // interpolationExpectRightParenNum 减 1
+                lexer->interpolationExpectRightParenNum--;
+                // 如果 interpolationExpectRightParenNum 减 1 后为 0
+                // 说明没有嵌套
+                // 然后调用 lexString 词法分析内嵌表达式后面的字符串
+                // 例如 "ab%(4+6)cb" 中的 cb
+                // 因为内嵌表达式一定会在字符串中
+                if (lexer->interpolationExpectRightParenNum == 0)
+                {
+                    lexString(lexer);
+                    break;
+                }
+            }
+            lexer->curToken.type = TOKEN_RIGHT_PAREN;
+            break;
+        default:
+            // 如果首字符是字母或者 _ 则说明是变量名（包含保留的关键字）
+            if (isalpha(lexer->curChar) || lexer->curChar == '_')
+            {
+                lexKeyword(lexer, TOKEN_UNKNOWN);
+            }
+            // TODO: 没有对数字进行词法解析
+            return;
+        }
+
+        // 计算当前 Token 的长度
+        lexer->curToken.length = (uint32_t)(lexer->nextCharPtr - lexer->curToken.start);
+        // 读进下一个字符
+        scanNextChar(lexer);
+        return;
+    }
+}
