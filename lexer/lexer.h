@@ -2,7 +2,6 @@
 #define _LEXER_LEXER_H
 #include "common.h"
 #include "vm.h"
-#include "unicodeUtf8.h"
 
 // 定义脚本语言的所有 Token 类型
 typedef enum
@@ -108,9 +107,6 @@ struct lexer
     int interpolationExpectRightParenNum;
     VM *vm; // 表示该 lexer 属于那个 vm
 };
-
-// 用于获取下一个字符的内容
-char getNextChar(Lexer *lexer);
 
 // 获取 Token 方法
 void getNextToken(Lexer *lexer);

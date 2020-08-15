@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include "utils.h"
+#include "lexer.h"
 #include "vm.h"
 
 // 内存管理函数，根据传入的参数会有三种不同作用：

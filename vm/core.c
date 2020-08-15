@@ -1,5 +1,6 @@
 #include <string.h>
 #include <sys/stat.h>
+#include "core.h"
 #include "vm.h"
 #include "utils.h"
 
@@ -23,7 +24,7 @@ char *readFile(const char *path)
     size_t fileSize = fileStat.st_size;
 
     // 获取源码文件大小后，为源码字符串申请内存，多申请的1个字节是为了字符串结尾 \0
-    char *fileContent = (char *)molloc(fileSize + 1);
+    char *fileContent = (char *)malloc(fileSize + 1);
     if (fileContent == NULL)
     {
         MEM_ERROR("Couldn't allocate memory for reading file \"%s\".\n", path);
