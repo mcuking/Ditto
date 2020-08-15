@@ -11,6 +11,12 @@ Ditto is a scripting language implemented in C
 
 其中几乎所有需要解释的代码都会有相关注释，方便理解整体实现思路。
 
+## 如何调试
+
+本项目采用 make 进行构建，另外针对 VSCode 添加了相应的配置文件 launch.json 以及 tasks.json。
+
+仅需要使用 VSCode 加载本项目，并且在代码中设置相应的断点，然后启动 debug 即可进行调试。
+
 ## 阶段成果
 
 ### 实现初步词法分析器
