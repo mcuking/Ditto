@@ -4,6 +4,8 @@
 #include <ctype.h>
 #include "lexer.h"
 #include "utils.h"
+#include "common.h"
+#include "unicodeUtf8.h"
 
 // 定义关键字对应 Token 的结构体
 struct keywordToken
@@ -36,14 +38,16 @@ struct keywordToken keywordsToken[] = {
     {NULL, 0, TOKEN_UNKNOWN}};
 
 // 判断以 start 开头，长度为 length 的单词是否是关键字，然后返回相应的 TokenType
-static TokenType keywordOrId(const *start, uint32_t length)
+static TokenType keywordOrId(const char *start, uint32_t length)
 {
     uint32_t idx = 0;
     while (keywordsToken[idx].keyword != NULL)
     {
         // 遍历关键字 Token 数组，查看和 start 开头，长度为 length 的单词是否相同
+        // memcmp 比较 keywordsToken[idx].keyword 指向的字符串 和 start 指向的字符串的前 length 个字符
+        // 如果返回 0，则说明两者相等
         if (keywordsToken[idx].length == length &&
-            memcmp(keywordsToken[idx].keyword, start, length))
+            memcmp(keywordsToken[idx].keyword, start, length) == 0)
         {
             // 找到则返回该 Token 的类型
             return keywordsToken[idx].type;
