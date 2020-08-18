@@ -15,7 +15,10 @@ struct vm
     ObjHeader *allObjects;
 };
 
+// 初始化虚拟机
 void initVM(VM *vm);
+
+// 新建虚拟机
 VM *newVM(void);
 
 #endif

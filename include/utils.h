@@ -42,8 +42,8 @@ typedef struct
 
 typedef struct
 {
-    uint32_t length;
     char start[0];
+    uint32_t length;
 } CharValue;
 
 #define DECLARE_BUFFER_TYPE(type)                                                 \

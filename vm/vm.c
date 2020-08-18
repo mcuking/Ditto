@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include "vm.h"
 
-// 初始化一个虚拟机
+// 初始化虚拟机
 void initVM(VM *vm)
 {
     // 记录已经分配的内存总和
@@ -12,7 +12,7 @@ void initVM(VM *vm)
     vm->allObjects = NULL;
 };
 
-// 创建一个新的虚拟机
+// 新建虚拟机
 VM *newVM()
 {
     // 为虚拟机申请内存，返回一个指针指向虚拟机
