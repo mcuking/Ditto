@@ -1,5 +1,6 @@
 CC = gcc
-# gcc 的参数，其中 -I 用来告诉编译器第一个寻找头文件的目录；-Wall 表示输出所有类型的 warning；-g 会创建符号表，方便调试；-DDEBUG 是自定义宏
+# gcc 的参数，其中 -I 用来告诉编译器第一个寻找头文件的目录；-Wall 表示输出所有类型的 warning；-g 会创建符号表，方便调试；
+# -DDEBUG 是自定义宏，其中 -D 表示定义宏，后面接的就是宏的内容
 CFLAGS += -Wall -g -DDEBUG -I lexer -I include -I vm -I cli
 TARGET = di
 DIRS = lexer include vm cli

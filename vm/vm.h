@@ -5,8 +5,8 @@
 
 struct vm
 {
+    Class *fnClass;
     Class *stringClass;
-
     // 记录已经分配的内存总和
     uint32_t allocatedBytes;
     // 当前词法分析器
