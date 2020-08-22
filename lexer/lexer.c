@@ -6,6 +6,8 @@
 #include "utils.h"
 #include "common.h"
 #include "unicodeUtf8.h"
+#include "obj_string.h"
+#include "class.h"
 
 // 定义关键字对应 Token 的结构体
 struct keywordToken
@@ -115,7 +117,58 @@ static void skipOneLine(Lexer *lexer)
     }
 }
 
-// 词法分析关键字
+// 跳过行注释和区块注释
+static void skipComment(Lexer *lexer)
+{
+    char nextChar = getNextChar(lexer);
+    if (lexer->curChar == '/')
+    {
+        // 行注释
+        skipOneLine(lexer);
+    }
+    else
+    {
+        // 区块注释
+        // TODO: 该逻辑可能有 bug，当在注释中有 * 作为注释的内容时，
+        // 不应该简单的跳出循环，然后判断下一个字符是不是 /
+        // 后续完善
+        while (nextChar != '*' && nextChar != '\0')
+        {
+            // 不停地读入注释中下一个字符
+            scanNextChar(lexer);
+
+            // 如果注释有换行，则更新 lineNo
+            // 主要是为了当某段代码报错时，能准确报出出错行数
+            if (lexer->curChar == '\n')
+            {
+                lexer->curToken.lineNo++;
+            }
+            // 获取下一个字符，用作下一个循环的判断
+            nextChar = getNextChar(lexer);
+        }
+
+        // 循环退出后，下一个字符要么是 * 要么是 \0
+        // 如果下一个字符是 *，再判断下下个字符是不是 /
+        // 如果是，则说明注释结束，读取下个字符
+        if (matchNextChar(lexer, '*'))
+        {
+            if (!matchNextChar(lexer, '/'))
+            {
+                LEX_ERROR(lexer, "expect '/' after '*'!");
+            }
+            scanNextChar(lexer);
+        }
+        else
+        {
+            // 如果下一个字符是 \0，则报错
+            LEX_ERROR(lexer, "expect '*/' before comment end!");
+        };
+    }
+    // 注释之后可能会有空白符
+    skipBlanks(lexer);
+}
+
+// 解析关键字
 static void lexKeyword(Lexer *lexer, TokenType type)
 {
     // 判断当前字符 curChar 是否是字母/数字/_，如果是则继续读下个字符
@@ -141,7 +194,7 @@ static void lexKeyword(Lexer *lexer, TokenType type)
     }
 }
 
-// 词法分析 unicode 码点
+// 解析 unicode 码点
 // 前置知识：
 // unicode 码点是 4 个十六进制数字，比如 “字” 的码点就是 0x5B57
 // 为了和数字区分，用转义字符 \u 做前缀，即 \u5B57
@@ -198,7 +251,7 @@ static void lexUnicodeCodePoint(Lexer *lexer, ByteBuffer *buf)
     encodeUtf8(buf->datas + buf->count - byteNum, value);
 }
 
-// 词法分析字符串
+// 解析字符串
 static void lexString(Lexer *lexer)
 {
     ByteBuffer str;
@@ -301,55 +354,81 @@ static void lexString(Lexer *lexer)
     ByteBufferClear(lexer->vm, &str);
 }
 
-// 跳过行注释和区块注释
-static void skipComment(Lexer *lexer)
+// 解析八进制数字
+static void lexOctNum(Lexer *lexer)
 {
-    char nextChar = getNextChar(lexer);
-    if (lexer->curChar == '/')
+    // 判断当前字符是否是合法的八进制数字
+    while (lexer->curChar >= '0' && lexer->curChar < '8')
     {
-        // 行注释
-        skipOneLine(lexer);
+        scanNextChar(lexer);
     }
+}
+
+// 解析十六进制数字
+static void lexHexNum(Lexer *lexer)
+{
+    // 判断当前字符是否是合法的十六进制数字
+    while (isxdigit(lexer->curChar))
+    {
+        scanNextChar(lexer);
+    }
+}
+
+// 解析十进制数字
+static void lexDecNum(Lexer *lexer)
+{
+    // 判断当前字符是否是合法的十进制数字
+    while (isdigit(lexer->curChar))
+    {
+        scanNextChar(lexer);
+    }
+
+    // 遇到小数点，则跳过小数点解析后面的数字
+    if (lexer->curChar == '.' && isdigit(getNextChar(lexer)))
+    {
+        scanNextChar(lexer);
+    }
+}
+
+// 解析数字
+static void lexNum(Lexer *lexer)
+{
+    // 十六进制以 0x 开头
+    if (lexer->curChar == '0' && matchNextChar(lexer, 'x'))
+    {
+        // 跳过 x
+        scanNextChar(lexer);
+        // 解析十六进制数字
+        lexHexNum(lexer);
+        // strtol 方法是将 lexer->curToken.start 指向的字符串转成数字
+        // 第三个参数 16 表示是转成十六进制数字
+        // 第二个参数 NULL 表示不需要返回转换失败的字符串地址
+        lexer->curToken.value =
+            NUM_TO_VALUE(strtol(lexer->curToken.start, NULL, 16));
+    }
+    // 八进制以 0 开头
+    else if (lexer->curChar == '0' && isdigit(getNextChar(lexer)))
+    {
+        // 解析八进制数字
+        lexOctNum(lexer);
+        // strtol 同上
+        lexer->curToken.value =
+            NUM_TO_VALUE(strtol(lexer->curToken.start, NULL, 8));
+    }
+    // 十进制
     else
     {
-        // 区块注释
-        // TODO: 该逻辑可能有 bug，当在注释中有 * 作为注释的内容时，
-        // 不应该简单的跳出循环，然后判断下一个字符是不是 /
-        // 后续完善
-        while (nextChar != '*' && nextChar != '\0')
-        {
-            // 不停地读入注释中下一个字符
-            scanNextChar(lexer);
-
-            // 如果注释有换行，则更新 lineNo
-            // 主要是为了当某段代码报错时，能准确报出出错行数
-            if (lexer->curChar == '\n')
-            {
-                lexer->curToken.lineNo++;
-            }
-            // 获取下一个字符，用作下一个循环的判断
-            nextChar = getNextChar(lexer);
-        }
-
-        // 循环退出后，下一个字符要么是 * 要么是 \0
-        // 如果下一个字符是 *，再判断下下个字符是不是 /
-        // 如果是，则说明注释结束，读取下个字符
-        if (matchNextChar(lexer, '*'))
-        {
-            if (!matchNextChar(lexer, '/'))
-            {
-                LEX_ERROR(lexer, "expect '/' after '*'!");
-            }
-            scanNextChar(lexer);
-        }
-        else
-        {
-            // 如果下一个字符是 \0，则报错
-            LEX_ERROR(lexer, "expect '*/' before comment end!");
-        };
+        // 解析十进制数字
+        lexDecNum(lexer);
+        // strtod 方法是将 lexer->curToken.start 指向的字符串转成十进制数字
+        // 第二个参数 NULL 表示不需要返回转换失败的字符串地址
+        lexer->curToken.value =
+            NUM_TO_VALUE(strtod(lexer->curToken.start, NULL));
     }
-    // 注释之后可能会有空白符
-    skipBlanks(lexer);
+
+    // nextCharPtr 会指向第一个不合法字符的下一个字符，所以需要再减 1
+    lexer->curToken.length = (uint32_t)(lexer->nextCharPtr - lexer->curToken.start - 1);
+    lexer->curToken.type = TOKEN_NUM;
 }
 
 // 获取 Token 方法
@@ -512,7 +591,14 @@ void getNextToken(Lexer *lexer)
             {
                 lexKeyword(lexer, TOKEN_UNKNOWN);
             }
-            // TODO: 没有对数字进行词法解析
+            else if (isdigit(lexer->curChar))
+            {
+                lexNum(lexer);
+            }
+            else
+            {
+                LEX_ERROR(lexer, "unsupport char: \'%c\', quit.", lexer->curChar);
+            }
             return;
         }
 

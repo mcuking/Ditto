@@ -2,6 +2,7 @@
 #define _LEXER_LEXER_H
 #include "common.h"
 #include "vm.h"
+#include "meta_obj.h"
 
 // 定义脚本语言的所有 Token 类型
 typedef enum
@@ -92,6 +93,7 @@ typedef struct
     const char *start; // 指向源码串中单词的起始地址
     uint32_t length;   // 该单词的长度
     uint32_t lineNo;   // 该单词所在源码中的行数
+    Value value;
 } Token;
 
 // 定义词法分析器的结构
@@ -103,9 +105,9 @@ struct lexer
     char curChar;            // 保存 sourceCode 中当前字符
     Token curToken;
     Token preToken;
-    // 记录内嵌表达式 %() 中括号对的数量
-    int interpolationExpectRightParenNum;
-    VM *vm; // 表示该 lexer 属于那个 vm
+    ObjModule *curModule;                 //当前正在编译的模块
+    int interpolationExpectRightParenNum; // 记录内嵌表达式 %() 中括号对的数量
+    VM *vm;                               // 表示该 lexer 属于那个 vm
 };
 
 // 获取 Token 方法
