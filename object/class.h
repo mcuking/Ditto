@@ -38,8 +38,12 @@ typedef enum
     value.num
 
 // 将 Object 结构转成 Value 结构
-#define Obj_TO_VALUE(objPtr) \
-    ((Value){VT_OBJ, {(ObjHeader *)(objPtr)}})
+#define OBJ_TO_VALUE(objPtr) ({              \
+    Value value;                             \
+    value.type = VT_OBJ;                     \
+    value.objHeader = (ObjHeader *)(objPtr); \
+    value;                                   \
+})
 
 // 将 Value结构转成 Object 结构
 #define VALUE_TO_OBJ(value) \

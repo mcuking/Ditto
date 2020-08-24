@@ -38,7 +38,7 @@ typedef enum
 } ValueType;
 
 // 通用的值结构
-// 可以表示所有类型的值，例如 bool number object 等
+// 可以表示所有类型的值
 typedef struct
 {
     // union 中的值由 type 的值决定
@@ -46,9 +46,8 @@ typedef struct
     union
     {
         double num;
-        ObjHeader objHeader;
+        ObjHeader *objHeader;
     };
-
 } Value;
 
 // TODO: 待后续解释

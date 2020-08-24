@@ -16,6 +16,13 @@
 // 独立的指令集合单元成为指令流单元，例如模块就是最大的指令流单元，函数、类中的每个方法、代码块、闭包都是指令流单元
 // 只要是指令流单元就可以用 ObjFn 表示，因此 ObjFn 泛指一切指令流单元
 
+// 定义函数中的调试的结构体
+typedef struct
+{
+    char *fnName;
+    IntBuffer lineNo;
+} FnDebug;
+
 // 定义自由变量 upvalue 对象的结构体
 typedef struct
 {
@@ -31,24 +38,6 @@ typedef struct
     // 指向下一个 upvalue，从而形成 upvalue 链表
     struct upvalue *next;
 } ObjUpvalue;
-
-// 定义闭包对象的结构体
-// 闭包：引用自由变量的内部函数 + 引用的自由变量集合
-typedef struct
-{
-    ObjHeader objHeader;
-    // 引用自由变量的内部函数
-    ObjFn *fn;
-    // 引用的自由变量集合
-    ObjUpvalue *upvalues[0];
-} ObjClosure;
-
-// 定义函数中的调试的结构体
-typedef struct
-{
-    char *fnName;
-    IntBuffer lineNo;
-} FnDebug;
 
 // 定义函数对象的结构体
 typedef struct
@@ -74,6 +63,17 @@ typedef struct
     FnDebug *debug;
 #endif
 } ObjFn;
+
+// 定义闭包对象的结构体
+// 闭包：引用自由变量的内部函数 + 引用的自由变量集合
+typedef struct
+{
+    ObjHeader objHeader;
+    // 引用自由变量的内部函数
+    ObjFn *fn;
+    // 引用的自由变量集合
+    ObjUpvalue *upvalues[0];
+} ObjClosure;
 
 // 定义函数调用帧栈的结构体
 typedef struct
