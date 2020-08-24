@@ -28,37 +28,6 @@ ObjUpvalue *newObjUpvalue(VM *vm, Value *localVarPtr)
     return objUpvalue;
 }
 
-// 新建闭包对象
-// 其中 objFn->upvalueNum 指的是该函数对象所引用自由变量的个数
-ObjClosure *newObjClosure(VM *vm, ObjFn *objFn)
-{
-    // 申请内存
-    ObjClosure *objClosure =
-        ALLOCATE_EXTRA(vm, ObjClosure, sizeof(objClosure->upvalues) * objFn->upvalueNum);
-
-    // 申请内存失败
-    if (objClosure == NULL)
-    {
-        MEM_ERROR("allocate ObjClosure failed!");
-    }
-
-    // 初始化对象头
-    initObjHeader(vm, &objClosure->objHeader, OT_CLOSURE, NULL);
-
-    objClosure->fn = objFn;
-
-    // 清空自由变量数组 upvalues
-    // 避免在向 upvalues 塞入真正的自由变量之前触发GC
-    uint32_t idx = 0;
-    while (idx < objFn->upvalueNum)
-    {
-        objClosure->upvalues[idx] = NULL;
-        idx++;
-    }
-
-    return objClosure;
-}
-
 // 新建函数对象
 ObjFn *newObjFn(VM *vm, ObjModule *objModule, uint32_t slotNum)
 {
@@ -93,4 +62,37 @@ ObjFn *newObjFn(VM *vm, ObjModule *objModule, uint32_t slotNum)
 
     // 函数在运行时栈中所需的最大空间
     objFn->maxStackSlotUsedNum = slotNum;
+
+    return objFn;
+}
+
+// 新建闭包对象
+// 其中 objFn->upvalueNum 指的是该函数对象所引用自由变量的个数
+ObjClosure *newObjClosure(VM *vm, ObjFn *objFn)
+{
+    // 申请内存
+    ObjClosure *objClosure =
+        ALLOCATE_EXTRA(vm, ObjClosure, sizeof(objClosure->upvalues) * objFn->upvalueNum);
+
+    // 申请内存失败
+    if (objClosure == NULL)
+    {
+        MEM_ERROR("allocate ObjClosure failed!");
+    }
+
+    // 初始化对象头
+    initObjHeader(vm, &objClosure->objHeader, OT_CLOSURE, NULL);
+
+    objClosure->fn = objFn;
+
+    // 清空自由变量数组 upvalues
+    // 避免在向 upvalues 塞入真正的自由变量之前触发GC
+    uint32_t idx = 0;
+    while (idx < objFn->upvalueNum)
+    {
+        objClosure->upvalues[idx] = NULL;
+        idx++;
+    }
+
+    return objClosure;
 }

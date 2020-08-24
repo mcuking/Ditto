@@ -27,8 +27,8 @@ void hashObjString(ObjString *objString)
 // 新建字符串对象
 ObjString *newObjString(VM *vm, const char *str, uint32_t length)
 {
-    // length 为 0 时 str 必为 NULL，否则报错
-    ASSERT(length == 0 && str == Null, "str length don't match str!");
+    //length为 0 时 str 必为 NULL  length 不为 0 时 str 不为 NULL
+    ASSERT(length == 0 || str != NULL, "str length don't match str!");
 
     // 根据字符串对象结构体和字符串长度申请需要的内存
     // 注：之所以需要加 1，是因为需要设置字符串结束符 \0
@@ -48,14 +48,15 @@ ObjString *newObjString(VM *vm, const char *str, uint32_t length)
     initObjHeader(vm, &objString->objHeader, OT_STRING, vm->stringClass);
 
     /** 2. 设置 value **/
-    objString->value.length = length;
-
     // 如果字符串非空，则需要赋值其内容
     if (length > 0)
     {
         // 将 str 所指的字符串的 length 个字符复制到 objString->value.start 所指的字符串
         memcpy(objString->value.start, str, length);
     }
+
+    objString->value.length = length;
+
     // 结尾添加字符串结束符 \0
     objString->value.start[length] = '\0';
 
