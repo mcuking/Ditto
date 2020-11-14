@@ -1,5 +1,5 @@
-#ifndef _OBJECT_META_OBJ
-#define _OBJECT_META_OBJ
+#ifndef _OBJECT_META_OBJ_H
+#define _OBJECT_META_OBJ_H
 #include "obj_string.h"
 
 // 定义模块对象结构
