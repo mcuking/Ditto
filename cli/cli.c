@@ -85,7 +85,9 @@ static void runFile(const char *path)
     const char *sourceCode = readFile(path);
 
     struct lexer lexer;
-    initLexer(vm, &lexer, path, sourceCode);
+    // 最后一个参数表示正在解析的模块
+    // TODO: 正在解析的模块临时设置成 NULL，后续完善
+    initLexer(vm, &lexer, path, sourceCode, NULL);
 
     while (lexer.curToken.type != TOKEN_EOF)
     {

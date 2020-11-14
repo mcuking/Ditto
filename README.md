@@ -19,12 +19,12 @@ Ditto is a scripting language implemented in C
 
 ## 阶段成果
 
-### 实现初步词法分析器
+### 实现词法分析器
 
 ```
 import people for People 
 fun fn() {
-   var p = People.new("xiaoming", "male")
+   var p = People.new("xiaoming", "male", 20.0)
    p.sayHi()
 }
 
@@ -36,7 +36,7 @@ class Family < People {
       father = f
       mother = m
       child  = c
-      super("wbf", "male")
+      super("wbf", "male", 60)
    }
 }
 
@@ -68,6 +68,8 @@ fn()
 3L: STRING ["xiaoming"]
 3L: COMMA [,]
 3L: STRING ["male"]
+3L: COMMA [,]
+3L: NUM [20.0]
 3L: RIGHT_PAREN [)]
 4L: ID [p]
 4L: DOT [.]
