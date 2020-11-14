@@ -42,7 +42,7 @@ ObjString *newObjString(VM *vm, const char *str, uint32_t length)
         MEM_ERROR("Allocating ObjString failed!");
     }
 
-    /** 1. 设置 objHeader **/
+    /** 1. 初始化对象头 **/
     // 注意：&objString->objHeader 中 -> 优先级高于 &
     // 所以是取的 objHeader，然后再获取它的地址
     initObjHeader(vm, &objString->objHeader, OT_STRING, vm->stringClass);

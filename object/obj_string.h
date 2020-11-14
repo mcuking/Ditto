@@ -1,5 +1,5 @@
-#ifndef _OBJECT_OBJ_STRING
-#define _OBJECT_OBJ_STRING
+#ifndef _OBJECT_OBJ_STRING_H
+#define _OBJECT_OBJ_STRING_H
 #include "header_obj.h"
 
 // 定义字符串对象结构

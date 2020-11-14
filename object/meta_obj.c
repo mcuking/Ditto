@@ -23,7 +23,7 @@ ObjModule *newObjModule(VM *vm, const char *modName)
         objModule->name = newObjString(vm, modName, strlen(modName));
     }
 
-    /** 2. 设置 objHeader **/
+    /** 2. 初始化对象头 **/
     // 注意：&objModule->objHeader 中 -> 优先级高于 &
     // 所以是取的 objHeader，然后再获取它的地址
     // 另外 ObjModule 时元信息对象，不属于任何一个类，
