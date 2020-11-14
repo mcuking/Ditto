@@ -351,6 +351,9 @@ static void lexString(Lexer *lexer)
             ByteBufferAdd(lexer->vm, &str, lexer->curChar);
         }
     }
+    // 用解析到的字符串新建字符串对象，并存储到 curToken 的 value 中
+    ObjString *objString = newObjString(lexer->vm, (const char *)str.datas, str.count);
+    lexer->curToken.value = OBJ_TO_VALUE(objString);
     ByteBufferClear(lexer->vm, &str);
 }
 
@@ -383,10 +386,14 @@ static void lexDecNum(Lexer *lexer)
         scanNextChar(lexer);
     }
 
-    // 遇到小数点，则跳过小数点解析后面的数字
     if (lexer->curChar == '.' && isdigit(getNextChar(lexer)))
     {
         scanNextChar(lexer);
+        while (isdigit(lexer->curChar))
+        {
+            // 遇到小数点，则跳过小数点解析后面的数字
+            scanNextChar(lexer);
+        }
     }
 }
 
@@ -438,6 +445,7 @@ void getNextToken(Lexer *lexer)
     lexer->preToken = lexer->curToken;
     // 跳过待识别单词之前的空格
     skipBlanks(lexer);
+
     // 初始化 curToken
 
     // 默认为文件结束类型 TOKEN_EOF
@@ -445,6 +453,8 @@ void getNextToken(Lexer *lexer)
     lexer->curToken.length = 0;
     // 将下一个字符的地址减 1 即是当前字符地址，也就是 curToken 开始地址
     lexer->curToken.start = lexer->nextCharPtr - 1;
+    // 初始化 curToken 值为 VT_UNDEFINED 的 Value 结构形式
+    lexer->curToken.value = VT_TO_VALUE(VT_UNDEFINED);
 
     // 因词法分析器并不采用有限状态机，所以并不需要循环
     // 之所以这里有循环，是因为如果解析碰到注释，没有循环的话，本次函数调用无法获得一个正常的 Token
@@ -643,7 +653,7 @@ void assertNextToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg
 }
 
 // 初始化词法分析器
-void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode)
+void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode, ObjModule *objModule)
 {
     lexer->vm = vm;
     // 由于 sourceCode 未必源自文件
@@ -659,4 +669,6 @@ void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode)
     lexer->curToken.type = TOKEN_UNKNOWN;
     lexer->preToken = lexer->curToken;
     lexer->interpolationExpectRightParenNum = 0;
+    // 当前正在解析的模块
+    lexer->curModule = objModule;
 }

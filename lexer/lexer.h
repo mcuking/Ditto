@@ -124,6 +124,6 @@ void assertCurToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg)
 void assertNextToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg);
 
 // 初始化词法分析器
-void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode);
+void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode, ObjModule *objModule);
 
 #endif
