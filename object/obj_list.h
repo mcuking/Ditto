@@ -3,6 +3,7 @@
 #include "class.h"
 #include "vm.h"
 
+// 定义 list 对象结构
 typedef struct
 {
     ObjHeader objHeader;  // 对象头
