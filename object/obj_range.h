@@ -3,6 +3,7 @@
 #include "class.h"
 #include "vm.h"
 
+// 定义 range 对象结构
 typedef struct
 {
     ObjHeader objHeader;

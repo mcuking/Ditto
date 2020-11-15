@@ -6,6 +6,7 @@
 struct vm
 {
     Class *fnClass;
+    Class *mapClass;
     Class *listClass;
     Class *rangeClass;
     Class *stringClass;
