@@ -7,6 +7,7 @@ struct vm
 {
     Class *fnClass;
     Class *listClass;
+    Class *rangeClass;
     Class *stringClass;
     // 记录已经分配的内存总和
     uint32_t allocatedBytes;
