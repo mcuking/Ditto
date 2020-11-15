@@ -5,6 +5,8 @@
 #include "header_obj.h"
 #include "obj_string.h"
 #include "obj_fn.h"
+#include "obj_range.h"
+#include "obj_list.h"
 
 // 方法类型
 typedef enum
@@ -45,23 +47,47 @@ typedef enum
     value;                                   \
 })
 
-// 将 Value结构转成 Object 结构
+// 将 Value 结构转成 Object 结构
 #define VALUE_TO_OBJ(value) \
     value.objHeader
 
-// 将 Value结构转成 String 结构
+// 将 Value 结构转成 String 结构
 #define VALUE_TO_OBJSTR(value) \
     (ObjString *)VALUE_TO_OBJ(value)
 
-// 将 Value结构转成 Function 结构
+// 将 Value 结构转成 Function 结构
 #define VALUE_TO_OBJFN(value) \
     (ObjFn *)VALUE_TO_OBJ(value)
 
-// 将 Value结构转成 Closure 结构
+// 将 Value 结构转成 Range 结构
+#define VALUE_TO_OBJRANGE(value) \
+    (ObjRange *)VALUE_TO_OBJ(value)
+
+// 将 Value 结构转成 Instance 结构
+#define VALUE_TO_OBJINSTANCE(value) \
+    (ObjInstance *)VALUE_TO_OBJ(value)
+
+// 将 Value 结构转成 List 结构
+#define VALUE_TO_OBJLIST(value) \
+    (ObjList *)VALUE_TO_OBJ(value)
+
+// 将 Value 结构转成 Map 结构
+#define VALUE_TO_OBJMAP(value) \
+    (ObjMap *)VALUE_TO_OBJ(value)
+
+// 将 Value 结构转成 Closure 结构
 #define VALUE_TO_OBJCLOSURE(value) \
     (ObjClosure *)VALUE_TO_OBJ(value)
 
-// 将 Value结构转成 Class 结构
+// 将 Value 结构转成 Thread 结构
+#define VALUE_TO_OBJTHREAD(value) \
+    (ObjThread *)VALUE_TO_OBJ(value)
+
+// 将 Value 结构转成 Module 结构
+#define VALUE_TO_OBJMODULE(value) \
+    (ObjModule *)VALUE_TO_OBJ(value)
+
+// 将 Value 结构转成 Class 结构
 #define VALUE_TO_OBJCLASS(value) \
     (Class *)VALUE_TO_OBJ(value)
 
