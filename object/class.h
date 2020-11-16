@@ -21,7 +21,7 @@ typedef enum
 
 // 将类型为 vt 的值转成 Value 结构
 #define VT_TO_VALUE(vt) \
-    ((Value){vt, {0}})
+    ((Value){vt, {0}}) // 强制类型转换成 Value
 
 // 将 Bool 结构转成 Value 结构
 #define BOOL_TO_VALUE(boolean) \
@@ -186,10 +186,10 @@ typedef union
     double num;
 } Bits64;
 
-// TODO: 待后续解释
-#define CAPACIRY_GROW_FACTOR 4;
+// 容量的扩展倍数（用于 list、map 等对象的容量设置中）
+#define CAPACIRY_GROW_FACTOR 4
 
-// TODO: 待后续解释
-#define MIN_CAPACITY 64;
+// 最小容量（用于 map 等对象的容量设置中）
+#define MIN_CAPACITY 64
 
 #endif
