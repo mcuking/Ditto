@@ -2,20 +2,26 @@
 #define _VM_VM_H
 #include "common.h"
 #include "header_obj.h"
+#include "obj_thread.h"
 
 struct vm
 {
     Class *fnClass;
+    Class *classOfClass;
+    Class *objectClass;
     Class *mapClass;
     Class *listClass;
     Class *rangeClass;
     Class *stringClass;
-    // 记录已经分配的内存总和
-    uint32_t allocatedBytes;
-    // 当前词法分析器
-    Lexer *curLexer;
-    // 指向所有已分配对象链表的首节点，用于垃圾回收
-    ObjHeader *allObjects;
+    Class *nullClass;
+    Class *boolClass;
+    Class *numClass;
+    Class *threadClass;
+
+    uint32_t allocatedBytes; // 累计已分配的内存总和
+    ObjHeader *allObjects;   // 累计已分配的所有对象的链表（用于垃圾回收）
+    Lexer *curLexer;         // 当前词法分析器
+    ObjThread *curThread;    // 当前正在执行的线程
 };
 
 // 初始化虚拟机
