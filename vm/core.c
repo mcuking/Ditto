@@ -3,10 +3,14 @@
 #include "core.h"
 #include "vm.h"
 #include "utils.h"
+#include "class.h"
 
 // 源码文件所在的根目录，其值是在 cli.c 文件中设置的
 // 解释器运行时会获得源码文件所在路径并写入 rootDir
 char *rootDir = NULL;
+
+// 宏 CORE_MODULE 用来表示核心模块，值是 VT_NUL 的 Value 结构
+#define CORE_MODULE VT_TO_VALUE(VT_NULL)
 
 // 读取源码文件的方法
 // path 为源码路径
@@ -40,4 +44,20 @@ char *readFile(const char *path)
 
     fclose(file);
     return fileContent;
+}
+
+// 执行模块，目前为空函数
+VMResult executeModule(VM *vm, Value moduleName, const char *sourceCode)
+{
+    return VM_RESULT_ERROR;
+}
+
+// 编译核心模块
+void buildCore(VM *vm)
+{
+    // 创建核心模块
+    ObjModule *coreModule = newObjModule(vm, NULL);
+    // 将核心模块 coreModule 收集到 vm->allModules 中
+    // vm->allModules 的 key 为 CORE_MODULE， value 为 coreModule 的 Value 结构
+    mapSet(vm, vm->allModules, CORE_MODULE, OBJ_TO_VALUE(coreModule));
 }

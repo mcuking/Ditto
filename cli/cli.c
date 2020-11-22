@@ -3,6 +3,7 @@
 #include "lexer.h"
 #include "vm.h"
 #include "core.h"
+#include "class.h"
 
 char *tokenArray[] = {
     "UNKNOWN",
@@ -84,24 +85,8 @@ static void runFile(const char *path)
     VM *vm = newVM();
     const char *sourceCode = readFile(path);
 
-    struct lexer lexer;
-    // 最后一个参数表示正在解析的模块
-    // TODO: 正在解析的模块临时设置成 NULL，后续完善
-    initLexer(vm, &lexer, path, sourceCode, NULL);
-
-    while (lexer.curToken.type != TOKEN_EOF)
-    {
-        getNextToken(&lexer);
-        // 读取一个 token 然后打印
-        printf("%dL: %s [", lexer.curToken.lineNo, tokenArray[lexer.curToken.type]);
-        // 在打印 token 对应的源码串
-        uint32_t idx = 0;
-        while (idx < lexer.curToken.length)
-        {
-            printf("%c", *(lexer.curToken.start + idx++));
-        }
-        printf("]\n");
-    }
+    // 第二个参数为模块名称（moduleName），即用文件路径作为模块名称
+    executeModule(vm, OBJ_TO_VALUE(newObjString(vm, path, strlen(path))), sourceCode);
 }
 
 int main(int argc, const char **argv)
