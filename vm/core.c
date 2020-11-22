@@ -61,3 +61,13 @@ void buildCore(VM *vm)
     // vm->allModules 的 key 为 CORE_MODULE， value 为 coreModule 的 Value 结构
     mapSet(vm, vm->allModules, CORE_MODULE, OBJ_TO_VALUE(coreModule));
 }
+
+// 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
+int getIndexFromSymbolTable(SymbolTable *table, const char *symbol, uint32_t length)
+{
+}
+
+// 向 table 中添加符号 symbol，并返回其索引
+int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length)
+{
+}
