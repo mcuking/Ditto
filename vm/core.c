@@ -19,7 +19,7 @@ char *rootDir = NULL;
 #define RET_VALUE(value) \
     do                   \
     {                    \
-        arg[0] = value;  \
+        args[0] = value; \
         return true;     \
     } while (0);
 
@@ -61,6 +61,101 @@ char *rootDir = NULL;
         method.primFn = func;                                                             \
         bindMethod(vm, classPtr, (uint32_t)globalIdx, method);                            \
     }
+
+/**
+ * 定义对象的原生方法（提供脚本语言调用）
+**/
+
+// !args[0]: object 取反，结果为 false
+static bool primObjectNot(VM *vm UNUSED, Value *args)
+{
+    RET_VALUE(VT_TO_VALUE(VT_FALSE));
+}
+
+// args[0] == args[1]: 返回 object 是否相等
+static bool primObjectEqual(VM *vm UNUSED, Value *args)
+{
+    Value boolValue = BOOL_TO_VALUE(valueIsEqual(args[0], args[1]));
+    RET_VALUE(boolValue);
+}
+
+// args[0] == args[1]: 返回 object 是否不等
+static bool primObjectEqual(VM *vm UNUSED, Value *args)
+{
+    Value boolValue = BOOL_TO_VALUE(!valueIsEqual(args[0], args[1]));
+    RET_VALUE(boolValue);
+}
+
+// args[0] is args[1]: args[1] 类是否是 args[0] 对象所属的类或者其子类
+static bool primObjectIs(VM *vm, Value *args)
+{
+    // args[1] 必须是 class
+    if (!VALUE_IS_CLASS(args[1]))
+    {
+        RUN_ERROR("argument must be class!");
+    }
+
+    Class *thisClass = getClassOfObj(vm, args[0]);
+    Class *baseClass = (Class *)(args[1].objHeader);
+
+    // 可能是多级继承，所以需要自下而上遍历基类链
+    while (baseClass != NULL)
+    {
+        // 如果某一级基类匹配到，就设置返回值为 VT_TRUE 并返回
+        if (thisClass == baseClass)
+        {
+            RET_VALUE(VT_TO_VALUE(VT_TRUE));
+        }
+        baseClass = baseClass->superClass;
+    }
+
+    // 若未找到满足条件的基类，则设置返回值为 VT_FALSE 并返回
+    RET_VALUE(VT_TO_VALUE(VT_FALSE));
+}
+
+// args[0].toString: 返回 args[0] 所属的 class 的名字
+static bool primObjectToString(VM *vm UNUSED, Value *args)
+{
+    Class *class = args[0].objHeader->class;
+    Value nameValue = OBJ_TO_VALUE(class->name);
+    RET_VALUE(nameValue);
+}
+
+// args[0].type: 返回 args[0] 对象所属的类
+static bool primObjectType(VM *vm, Value *args)
+{
+    Class *class = getClassOfObj(vm, args[0]);
+    RET_OBJ(class);
+}
+
+/**
+ * 定义对象的原生方法（提供脚本语言调用）
+**/
+
+// args[0].name: 返回 args[0] 类的名字
+static bool primClassName(VM *vm UNUSED, Value *args)
+{
+    Class *class = VALUE_TO_OBJCLASS(args[0]);
+    RET_OBJ(class->name);
+}
+
+// args[0].toString: 返回 args[0] 类的名字
+static bool primClassToString(VM *vm UNUSED, Value *args)
+{
+    Class *class = VALUE_TO_OBJCLASS(args[0]);
+    RET_OBJ(class->name);
+}
+
+// args[0].supertype: 返回 args[0] 类的基类
+static bool primClassSupertype(VM *vm UNUSED, Value *args)
+{
+    Class *class = VALUE_TO_OBJCLASS(args[0]);
+    if (class->superClass != NULL)
+    {
+        RET_OBJ(class->superClass);
+    }
+    RET_VALUE(VT_TO_VALUE(VT_NULL));
+}
 
 // 读取源码文件的方法
 // path 为源码路径
