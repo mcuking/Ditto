@@ -238,3 +238,13 @@ int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length)
     StringBufferAdd(vm, table, string); // 向 table 中塞入 string
     return table->count - 1;
 }
+
+// 在 objModule 模块中定义名为 name 的类
+static Class *definClass(VM *vm, ObjModule *objModule, const char *name)
+{
+    // 创建类
+    Class *class = newRawClass(vm, name, 0);
+    // 将类作为普通变量在模块中定义
+    defineModuleVar(vm, objModule, name, strlen(name), OBJ_TO_VALUE(class));
+    return class;
+}
