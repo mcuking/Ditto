@@ -210,9 +210,31 @@ void buildCore(VM *vm)
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
 int getIndexFromSymbolTable(SymbolTable *table, const char *symbol, uint32_t length)
 {
+    ASSERT(length != 0, "length of symbol is 0!");
+    uint32_t index = 0;
+    // 遍历 table->data，找到与 symbol 相等的，然后返回该索引值
+    while (index < table->count)
+    {
+        if (length == table->datas[index].length == length && memcmp(table->datas[index].str, symbol, length) == 0)
+        {
+            return index;
+        }
+        index++;
+    }
+    // 找不到则返回 -1
+    return -1;
 }
 
-// 向 table 中添加符号 symbol，并返回其索引
+// 向 table 中添加符号 symbol，并返回 symbol 对应在 table 的索引
 int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length)
 {
+    ASSERT(length != 0, "length of symbol is 0!");
+
+    String string;
+    string.str = ALLOCATE_ARRAY(vm, char, length + 1); // 申请内存，加 1 是为了添加结尾符 \0
+    memcpy(string.str, symbol, length);                // 将 symbol 内容拷贝到 string.str 上
+    string.str[length] = '\0';
+    string.length = length;
+    StringBufferAdd(vm, table, string); // 向 table 中塞入 string
+    return table->count - 1;
 }
