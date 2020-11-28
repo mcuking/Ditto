@@ -59,3 +59,47 @@ bool valueIsEqual(Value a, Value b)
     // 默认不相等
     return false;
 }
+
+// 新建名字为 name，属性个数为 fieldNum 的裸类（裸类即没有归属的类，其对象头的 class 指针为空）
+Class *newRawClass(VM *vm, const char *name, uint32_t fieldNum)
+{
+    // 申请内存
+    Class *class = ALLOCATE(vm, Class);
+
+    // 申请内存失败
+    if (class == NULL)
+    {
+        MEM_ERROR("allocate RawClass failed!");
+    }
+
+    // 初始化对象头
+    initObjHeader(vm, &class->objHeader, OT_CLASS, NULL);
+
+    class->name = newObjString(vm, name, strlen(name));
+    class->fieldNum = fieldNum;
+    class->superClass = NULL; // 默认没有基类
+    MethodBufferInit(&class->methods);
+
+    return class;
+}
+
+// 获取对象所属的类
+// inline 在函数定义之前（函数声明前无用），表示该函数为内联函数，即会将函数中的代码直接内联到调用的函数中，省去了调用独立函数的开销
+inline Class *getClassOfObj(VM *vm, Value object)
+{
+    switch (object.type)
+    {
+    case VT_NULL:
+        return vm->nullClass;
+    case VT_TRUE:
+    case VT_FALSE:
+        return vm->boolClass;
+    case VT_NUM:
+        return vm->numClass;
+    case VT_OBJ:
+        return VALUE_TO_OBJ(object)->class;
+    default:
+        NOT_REACHED();
+    }
+    return NULL;
+}

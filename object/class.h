@@ -192,4 +192,14 @@ typedef union
 // 最小容量（用于 map 等对象的容量设置中）
 #define MIN_CAPACITY 64
 
+// 判断 a 和 b 是否相等
+bool valueIsEqual(Value a, Value b);
+
+// 新建名字为 name，属性个数为 fieldNum 的裸类（裸类即没有归属的类，其对象头的 class 指针为空）
+Class *newRawClass(VM *vm, const char *name, uint32_t fieldNum);
+
+// 获取对象所属的类
+// inline 在函数定义之前（函数声明前无用），表示该函数为内联函数，即会将函数中的代码直接内联到调用的函数中，省去了调用独立函数的开销
+inline Class *getClassOfObj(VM *vm, Value object)
+
 #endif
