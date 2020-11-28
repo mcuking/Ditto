@@ -248,3 +248,38 @@ static Class *definClass(VM *vm, ObjModule *objModule, const char *name)
     defineModuleVar(vm, objModule, name, strlen(name), OBJ_TO_VALUE(class));
     return class;
 }
+
+// 绑定方法到指定类
+// 将方法 method 到类 class 的 methods 数组中，位置为 index
+void bindMethod(VM *vm, Class *class, uint32_t index, Method method)
+{
+    // 各类自己的 methods 数组和 vm->allMethodNames 长度保持一致，进而 vm->allMethodNames 中的方法名和各个类的 methods 数组对应方法体的索引值相等，
+    // 这样就可以通过相同的索引获取到方法体或者方法名
+    // 然而 vm->allMethodNames 只有一个，但会对应多个类，所以各个类的 methods 数组中的方法体数量必然会小于 vm->allMethodNames 中的方法名数量
+    // 为了保证一样长度，就需要将各个类的 methods 数组中无用的索引处用空占位填充
+    if (index > class->methods.count)
+    {
+        Method emptyPad = {MT_NONE, {0}};
+        MethodBufferFillWrite(vm, &class->methods, emptyPad, index - class->methods.count + 1);
+    }
+
+    class->methods.datas[index] = method;
+}
+
+// 绑定 superClass 为 subClass 的基类
+// 即继承基类的属性个数和方法（通过复制实现）
+void bindSuperClass(VM *vm, Class *subClass, Class *superClass)
+{
+    subClass->superClass = subClass;
+
+    // 继承基类的属性个数
+    subClass->fieldNum = superClass->fieldNum;
+
+    // 继承基类的方法
+    uint32_t idx = 0;
+    while (idx < superClass->methods.count)
+    {
+        bindMethod(vm, subClass, idx, superClass->methods.datas[idx]);
+        idx++;
+    }
+}
