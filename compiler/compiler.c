@@ -98,3 +98,9 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t len
 
     return symbolIndex;
 }
+
+// 编译模块 objModule 的方法
+// TODO: 等待后续完善
+ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode)
+{
+}

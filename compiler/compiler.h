@@ -86,4 +86,7 @@ typedef struct compileUnit CompileUnit;
 // 在模块 objModule 中定义名为 name，值为 value 的模块变量
 int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t length, Value value);
 
+// 编译模块 objModule 的方法
+ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode);
+
 #endif
