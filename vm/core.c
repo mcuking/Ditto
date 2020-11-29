@@ -202,9 +202,60 @@ char *readFile(const char *path)
     return fileContent;
 }
 
-// 执行模块，目前为空函数
-VMResult executeModule(VM *vm, Value moduleName, const char *sourceCode)
+// 从 vm->allModules 中获取名为 moduleName 的模块
+static ObjModule *getModule(VM *vm, Value moduleName)
 {
+    Value value = mapGet(vm, vm->allModules, moduleName);
+
+    if (value.type == VT_UNDEFINED)
+    {
+        return NULL;
+    }
+    return VALUE_TO_OBJMODULE(value);
+}
+
+// 加载名为 moduleName 的模块并进行编译
+static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode)
+{
+    // 先在 vm->allModules 中查找是否存在 moduleName
+    // 如果存在，说明对应模块已经加载，以避免重复加载
+    ObjModule *module = getModule(vm, moduleName);
+
+    // 否则需要先加载模块，且该模块需要继承核心模块中的变量
+    if (module == NULL)
+    {
+        // 创建模块并添加到 vm->allModules
+        ObjString *modName = VALUE_TO_OBJSTR(moduleName);
+        ASSERT(modName->value.start[modName->value.length] == = '\0', "string.value.start is not terminated!");
+        // 创建模块名为 modName 的模块对象
+        module = newObjModule(vm, modName);
+        // 将名为 moduleName 的模块加载到 vm->allModules
+        mapSet(vm, vm->allModules, moduleName, OBJ_TO_VALUE(module));
+
+        // 继承核心模块中变量，即将核心模块中的变量也拷贝到该模块中
+        // TODO: 待后续解释
+        ObjModule *coreModule = getModule(vm, CORE_MODULE);
+        uint32_t idx = 0;
+        while (idx < coreModule->moduleVarName.count)
+        {
+            defineModuleVar(vm, module,
+                            coreModule->moduleVarName.datas[idx].str,
+                            coreModule->moduleVarName.datas[idx].length,
+                            coreModule->moduleVarValue.datas[idx]);
+            idx++;
+        }
+    }
+
+    ObjFn *fn = compileModule(vm, module, moduleCode);
+    // 单独创建一个线程运行编译后的模块
+    ObjClosure *objClosure = newObjClosure(vm, fn);
+    ObjThread *objThread = newObjThread(vm, objClosure);
+}
+
+// 执行模块，目前为空函数
+VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode)
+{
+    ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
     return VM_RESULT_ERROR;
 }
 
