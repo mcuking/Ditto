@@ -80,7 +80,7 @@ static bool primObjectEqual(VM *vm UNUSED, Value *args)
 }
 
 // args[0] == args[1]: 返回 object 是否不等
-static bool primObjectEqual(VM *vm UNUSED, Value *args)
+static bool primObjectNotEqual(VM *vm UNUSED, Value *args)
 {
     Value boolValue = BOOL_TO_VALUE(!valueIsEqual(args[0], args[1]));
     RET_VALUE(boolValue);
@@ -129,7 +129,7 @@ static bool primObjectType(VM *vm, Value *args)
 }
 
 /**
- * 定义对象的原生方法（提供脚本语言调用）
+ * 定义类的原生方法（提供脚本语言调用）
 **/
 
 // args[0].name: 返回 args[0] 类的名字
@@ -155,6 +155,17 @@ static bool primClassSupertype(VM *vm UNUSED, Value *args)
         RET_OBJ(class->superClass);
     }
     RET_VALUE(VT_TO_VALUE(VT_NULL));
+}
+
+/**
+ * 定义objectClass 的元信息类的原生方法（提供脚本语言调用）
+**/
+
+// args[0].same(args[1], args[2]): 返回 args[1] 和 args[2] 是否相等
+static bool primObjectMetaSame(VM *vm UNUSED, Value *args)
+{
+    Value boolValue = BOOL_TO_VALUE(valueIsEqual(args[1], args[2]));
+    RET_VALUE(boolValue);
 }
 
 // 读取源码文件的方法
@@ -201,10 +212,50 @@ VMResult executeModule(VM *vm, Value moduleName, const char *sourceCode)
 void buildCore(VM *vm)
 {
     // 创建核心模块
+    // 核心模块不需要名字
     ObjModule *coreModule = newObjModule(vm, NULL);
+
     // 将核心模块 coreModule 收集到 vm->allModules 中
     // vm->allModules 的 key 为 CORE_MODULE， value 为 coreModule 的 Value 结构
     mapSet(vm, vm->allModules, CORE_MODULE, OBJ_TO_VALUE(coreModule));
+
+    // 1. 创建 objectClass 类，是所有类的基类，所有类都会直接或间接继承这个类
+    vm->objectClass = defineClass(vm, coreModule, "object");
+    // 绑定对象的原生方法到 objectClass 类
+    PRIM_METHOD_BIND(vm->objectClass, "!", primObjectNot);
+    PRIM_METHOD_BIND(vm->objectClass, "==(_)", primObjectEqual);
+    PRIM_METHOD_BIND(vm->objectClass, "!=(_)", primObjectNotEqual);
+    PRIM_METHOD_BIND(vm->objectClass, "is(_)", primObjectIs);
+    PRIM_METHOD_BIND(vm->objectClass, "toString", primObjectToString);
+    PRIM_METHOD_BIND(vm->objectClass, "type", primObjectType);
+
+    // 2. 创建 classOfClass 类，是所有元信息类的基类和元信息类
+    // 注：元信息类，用于描述普通类的信息的，主要保存类的方法，即静态方法
+    vm->classOfClass = defineClass(vm, coreModule, "class");
+    // 绑定类的原生方法到 classOfClass 类
+    PRIM_METHOD_BIND(vm->classOfClass, "name", primClassName);
+    PRIM_METHOD_BIND(vm->classOfClass, "supertype", primClassSupertype);
+    PRIM_METHOD_BIND(vm->classOfClass, "toString", primClassToString);
+
+    // 同时 classOfClass 类又继承了 objectClass 类，所以 objectClass 类是所有类的基类
+    bindSuperClass(vm, vm->classOfClass, vm->objectClass);
+
+    // 3. 创建 objectClass 类的元信息类，即 objectMetaClass 类
+    // 其无需挂在到 vm 上
+    Class *objectMetaClass = defineClass(vm, coreModule, "objectMeta");
+    // 绑定元信息类的原生方法到 objectMetaClass 类
+    PRIM_METHOD_BIND(objectMetaClass, "same(_,_)", primObjectMetaSame);
+
+    // 同时 objectMetaClass 类也继承了 classOfClass 类，即 classOfClass 类是所有元信息类的基类和元信息类
+    bindSuperClass(vm, objectMetaClass, vm->classOfClass);
+
+    // 4. 绑定各自的元信息类
+    // objectMetaClass 类是 objectClass 类的元信息类
+    vm->objectClass->objHeader.class = objectMetaClass;
+    // classOfClass 类是 objectMetaClass 类的元信息类（实际上是所有元信息类的元信息类）
+    objectMetaClass->objHeader.class = vm->classOfClass;
+    // classOfClass 类就是本身的元信息类，即元信息类的终点
+    vm->classOfClass->objHeader.class = vm->classOfClass;
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
@@ -240,7 +291,7 @@ int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length)
 }
 
 // 在 objModule 模块中定义名为 name 的类
-static Class *definClass(VM *vm, ObjModule *objModule, const char *name)
+static Class *defineClass(VM *vm, ObjModule *objModule, const char *name)
 {
     // 创建类
     Class *class = newRawClass(vm, name, 0);
