@@ -33,7 +33,16 @@ void *memManager(VM *vm, void *ptr, uint32_t oldSize, uint32_t newSize);
 uint32_t ceilToPowerOf2(uint32_t v);
 
 // 第三部分：数据缓冲区
-// TODO: 暂时未搞懂，后面填坑
+// 基于四个类型：Int/Char/Byte/String 宏定义了四种数据缓冲区，用来存储这四种数据类型的数据
+// 例如 ByteBuffer 结构如下，其中 datas 数组主要就是存储 byte 类型的数据，
+// count 表示 datas 数组中实际存储的 byte 类型的数据，capacity 表示 datas 数组最多可存储  byte 类型的数据的最大容量：
+// typedef struct
+// {
+//     byte *datas;
+//     uint32_t count;
+//     uint32_t capacity;
+// } ByteBuffer;
+
 typedef struct
 {
     char *str;
