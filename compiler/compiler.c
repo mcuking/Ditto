@@ -44,6 +44,135 @@ struct compileUnit
     Lexer *curLexer;
 };
 
+// 将 opcode 对运行时栈大小的影响定义到数组 opCodeSlotsUsed 中
+#define OPCODE_SLOTS(opCode, effect) effect
+
+// 通过上面对 OPCODE_SLOTS 的宏定义，可以获取到加了操作码对运行时栈大小的影响
+// 例如 OPCODE_SLOTS(LOAD_CONSTANT, 1) 返回的是 1，也即是说执行 LOAD_CONSTANT 操作码后会使运行时栈增加一个 slot
+// 然后将这些指令对运行时栈大小的影响集合，定义到 opCodeSlotsUsed 数组中
+// 之所以后面又将宏定义 OPCODE_SLOTS 取消定义，是因为其他地方也需要自定义 OPCODE_SLOTS 宏的逻辑，来获取不同的数据
+static const int opCodeSlotsUsed[] = {
+#include "opcode.inc"
+};
+#undef OPCODE_SLOTS
+
+// 初始化编译单元 CompileUnit
+static void initCompileUnit(Lexer *lexer, CompileUnit *cu, CompileUnit *enclosingUnit, bool isMethod)
+{
+    lexer->curCompileUnit = cu;
+    cu->curLexer = lexer;
+    cu->enclosingUnit = enclosingUnit;
+    cu->curLoop = NULL;
+    cu->enclosingClassBK = NULL;
+
+    // 三种情况：1. 模块中直接定义一级函数  2. 内层函数  3. 内层方法（即类的方法）
+
+    if (enclosingUnit == NULL) // 1. 模块中直接定义一级函数，即没有外层函数
+    {
+        // 当前作用域就是模块作用域
+        // 因为编译代码是从上到下从外到内的顺序，即从模块作用域开始，而模块作用域值为 -1
+        cu->scopeDepth = -1;
+        // 模块作用域中没有局部变量
+        cu->localVarNum = 0;
+    }
+    else
+    {
+        if (isMethod) // 3. 内层方法（即类的方法）
+        {
+            // 如果是类的方法，默认设定隐式 this 为第 0 个局部变量（this 指向的即对象实例对象）
+            cu->localVars[0].name = "this";
+            cu->localVars[0].length = 4;
+        }
+        else // 2. 内层函数
+        {
+            // 为了和类的方法保持统一，会空出第 0 个局部变量
+            cu->localVars[0].name = NULL;
+            cu->localVars[0].length = 0;
+        }
+
+        // 第 0 个局部变量比较特殊，作用域设置为模块级别
+        cu->localVars[0].scopeDepth = -1;
+        // 该变量不可能是 upvalue，因内层函数不可能引用上层的 this 对象，this 只能暴露给本层对象
+        cu->localVars[0].isUpvalue = false;
+
+        // 第 0 个局部变量已经被分配了，因此初始化为 1
+        cu->localVarNum = 1;
+
+        // 函数或方法只会在第 0 层局部变量出现
+        cu->scopeDepth = 0;
+    }
+
+    // 对于基于栈的虚拟机，局部变量是保存在运行时栈的
+    // 因此初始化运行时栈时，其大小等于局部变量的大小
+    cu->stackSlotNum = cu->localVarNum;
+
+    // 新建 objFn 对象，用于存储编译单元的指令流
+    cu->fn = newObjFn(cu->curLexer->vm, cu->curLexer->curModule, cu->localVarNum);
+}
+
+// 向函数的指令流中写入 1 字节，返回其索引
+static int writeByte(CompileUnit *cu, int byte)
+{
+#if DEBUG
+    // 调试状态时，还需要额外在 fn->debug->lineNo 中写入当前 token 所在行号，方便调试
+    IntBufferAdd(cu->curLexer->vm, &cu->fn->debug->lineNo, cu->curLexer->preToken.lineNo);
+#endif
+
+    ByteBufferAdd(cu->curLexer->vm, &cu->fn->instrStream, (uint8_t)byte);
+    return cu->fn->instrStream.count - 1;
+}
+
+// 向函数的指令流中写入操作码
+static void writeOpCode(CompileUnit *cu, OpCode opCode)
+{
+    writeByte(cu, opCode);
+    // 计算该编译单元需要用到的运行时栈总大小
+    // opCode 为操作符集合对应的枚举数据，值为对应的索引值
+    // 而 opCodeSlotsUsed 也是基于操作符集合生成的数组
+    // 因此可以通过索引值找到操作符对应的该操作符执行后对运行时栈大小的影响
+    cu->stackSlotNum += opCodeSlotsUsed[opCode];
+    // 如果计算的累计需要运行时栈大小大于当前最大运行时栈使用大小，则更新当前运行时栈使用大小
+    // 注意：这里记录的是运行过程中使用 slot 数量最多的情况，即记录栈使用过程中的峰值
+    // 因为指令对栈大小的影响有正有负，stackSlotNum 运行到最后可能为 0
+    // 但运行过程中对栈的使用量不可能为 0
+    if (cu->stackSlotNum > cu->fn->maxStackSlotUsedNum)
+    {
+        cu->fn->maxStackSlotUsedNum = cu->stackSlotNum;
+    }
+}
+
+// 写入 1 个字节的操作数
+static int writeByteOperand(CompileUnit *cu, int operand)
+{
+    return writeByte(cu, operand);
+}
+
+// 写入 2 个字节的操作数
+// 按照大端字节序写入参数，低地址写高位，高地址写低位
+inline static void writeShortOperand(CompileUnit *cu, int operand)
+{
+    writeByte(cu, (operand >> 8) & 0xff); // 先取高 8 位的值，也就是高地址的字节
+    writeByte(cu, operand & 0xff);        // 后取低 8 位的值，也就是低地址的字节
+}
+
+// 写入操作数为 1 字节大小的指令
+static int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
+{
+    // 1. 写操作码
+    writeOpCode(cu, opCode);
+    // 2. 写操作数
+    return writeByteOperand(cu, operand);
+}
+
+// 写入操作数为 2 字节大小的指令
+static void writeOpCodeShortOperand(CompileUnit *cu, OpCode opCode, int operand)
+{
+    // 1. 写操作码
+    writeOpCode(cu, opCode);
+    // 2. 写操作数
+    writeShortOperand(cu, operand);
+}
+
 // 在模块 objModule 中定义名为 name，值为 value 的模块变量
 int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t length, Value value)
 {
