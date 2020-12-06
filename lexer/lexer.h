@@ -3,6 +3,7 @@
 #include "common.h"
 #include "vm.h"
 #include "meta_obj.h"
+#include "compiler.h"
 
 // 定义脚本语言的所有 Token 类型
 typedef enum
@@ -105,8 +106,11 @@ struct lexer
     char curChar;            // 保存 sourceCode 中当前字符
     Token curToken;
     Token preToken;
-    ObjModule *curModule;                 //当前正在编译的模块
+    ObjModule *curModule;        // 当前正在编译的模块
+    CompileUnit *curCompileUnit; // 当前编译单元
+
     int interpolationExpectRightParenNum; // 记录内嵌表达式 %() 中括号对的数量
+    struct lexer *parent;                 // 指向父词法解析器
     VM *vm;                               // 表示该 lexer 属于那个 vm
 };
 
