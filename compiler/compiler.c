@@ -228,8 +228,51 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t len
     return symbolIndex;
 }
 
-// 编译模块 objModule 的方法
+// 编译程序
 // TODO: 等待后续完善
+static void compileProgram(CompileUnit *cu)
+{
+}
+
+// 编译模块 objModule 的方法
 ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode)
 {
+    // 每个模块（文件）都需要一个单独的词法分析器进行编译
+    Lexer *lexer;
+    lexer->parent = vm->curLexer;
+    vm->curLexer = &lexer;
+
+    // 初始化词法分析器
+    if (objModule->name == NULL)
+    {
+        // 核心模块对应的词法分析器用 core.script.inc 作为模块名进行初始化
+        initLexer(vm, lexer, "core.script.inc", moduleCode, objModule);
+    }
+    else
+    {
+        // 其余模块对应的词法分析器用该模块名进行初始化
+        initLexer(vm, lexer, (const char *)objModule->name->value.start, moduleCode, objModule);
+    }
+
+    // 初始化编译单元（模块也有编译单元）
+    // 有编译单元的：模块、函数、方法
+    CompileUnit moduleCU;
+    initCompileUnit(lexer, &moduleCU, NULL, false);
+
+    //记录当前编译模块的变量数量，后面检查预定义模块变量时可减少遍历
+    uint32_t moduleVarNumBefor = objModule->moduleVarValue.count;
+
+    // 由于 initLexer 初始化函数中将 lexer 的 curToken 的 type 设置为 TOKEN_UNKNOWN
+    // 会导致后面的 while 循环不执行（循环体用于执行真正编译的方法）
+    // 需要调用 getNextToken 指向第一个合法的 token
+    getNextToken(&lexer);
+
+    // 循环调用 compileProgram 函数进行编译，直到 token 流结尾
+    // TOKEN_EOF 标记文件结束，即该 token 为最后一个 token
+    while (!matchToken(lexer, TOKEN_EOF))
+    {
+        compileProgram(&moduleCU);
+    }
+
+    // TODO: 等待后续完善
 }
