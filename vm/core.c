@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "class.h"
 #include "compiler.h"
+#include "core.script.inc"
 
 // 源码文件所在的根目录，其值是在 cli.c 文件中设置的
 // 解释器运行时会获得源码文件所在路径并写入 rootDir
@@ -252,11 +253,12 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode)
     ObjThread *objThread = newObjThread(vm, objClosure);
 }
 
-// 执行模块，目前为空函数
+// 执行名为 moduleName 代码为 moduleCode 的模块
 VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode)
 {
     ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
     return VM_RESULT_ERROR;
+    // TODO: 等待后续完善
 }
 
 // 编译核心模块
@@ -307,6 +309,9 @@ void buildCore(VM *vm)
     objectMetaClass->objHeader.class = vm->classOfClass;
     // classOfClass 类就是本身的元信息类，即元信息类的终点
     vm->classOfClass->objHeader.class = vm->classOfClass;
+
+    //执行核心模块
+    executeModule(vm, CORE_MODULE, coreModuleCode);
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
