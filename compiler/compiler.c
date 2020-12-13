@@ -56,8 +56,95 @@ static const int opCodeSlotsUsed[] = {
 };
 #undef OPCODE_SLOTS
 
+// 定义操作符的绑定权值，即优先级
+// 从上到下优先级递增
+typedef enum
+{
+    BP_NONE,      // 无绑定能力
+    BP_LOWEST,    // 最低绑定能力
+    BP_ASSIGN,    // =
+    BP_CONDITION, // ?:
+    BP_LOGIC_OR,  // ||
+    BP_LOGIC_AND, // &&
+    BP_EQUAL,     // == !=
+    BP_IS,        // is
+    BP_CMP,       // < > <= >=
+    BP_BIT_OR,    // |
+    BP_BIT_AND,   // &
+    BP_BIT_SHIFT, // << >>
+    BP_RANGE,     // ..
+    BP_TERM,      // + -
+    BP_FACTOR,    // * / %
+    BP_UNARY,     // - ! ~
+    BP_CALL,      // . () []
+    BP_HIGHEST    // 最高绑定能力
+} BindPower;
+
+// 函数指针，用于指向各种符号的 nud 和 led 方法
+typedef void (*DenotationFn)(CompileUnit *cu, bool canAssign);
+
+// 函数指针，用于指向类的方法（方法会用方法签名作为 ID）
+typedef void (*methodSignatureFn)(CompileUnit *cu, Signature *signature);
+
+// 符号绑定规则
+typedef struct
+{
+    const char *id;               // 符号的字符串
+    BindPower lbp;                // 左绑定权值，不关心左操作数的符号该值为 0
+    DenotationFn nud;             // 字面量、变量、前缀运算符等不关心左操作数的 Token 调用该方法
+    DenotationFn led;             // 中缀运算符等关心左操作数的 Token 调用该方法
+    methodSignatureFn methodSign; // 表示该符号在类中被视为一个方法，所以为其生成一个方法签名，语义分析中涉及方法签名生成指令
+} SymbolBindRule;
+
+// 前缀符号（不关注左操作数的符号）
+// 包括字面量、变量名、前缀符号等非运算符
+#define PREFIX_SYMBOL(nud)             \
+    {                                  \
+        NULL, BP_NONE, nud, NULL, NULL \
+    }
+
+// 前缀运算符，例如 - ! ~
+#define PREFIX_OPERATOR(id)                                    \
+    {                                                          \
+        id, BP_NONE, unaryOperator, NULL, unaryMethodSignature \
+    }
+
+// 中缀符号（关注左操作数的符号）
+// 包括 1. 数组[  2. 函数(  3. 实例和方法之前的. 等等
+#define INFIX_SYMBOL(lbp, led)     \
+    {                              \
+        NULL, lbp, NULL, led, NULL \
+    }
+
+// 中缀运算符，例如 - ! ~
+#define INEFIX_OPERATOR(id, lbp)                           \
+    {                                                      \
+        id, lbp, NULL, infixOperator, infixMethodSignature \
+    }
+
+// 即可做前缀运算符，也可做中缀运算符，例如 - +
+#define MIX_OPERATOR(id)                                              \
+    {                                                                 \
+        id, BP_TERM, unaryOperator, infixOperator, mixMethodSignature \
+    }
+
+// 对于没有规则的符号，用 UNUSED_RULE 占位用的
+#define UNUSED_RULE                     \
+    {                                   \
+        NULL, BP_NONE, NULL, NULL, NULL \
+    }
+
+// 符号绑定规则的数组
+// 按照 lexer.h 中定义的 TokenType 中各种类型的 token 顺序添加对应的符号绑定规则
+SymbolBindRule Rules[] = {
+    UNUSED_RULE,            // TOKEN_INVALID
+    PREFIX_SYMBOL(literal), // TOKRN_NUM
+    PREFIX_SYMBOL(literal), // TOKEN_STRING
+};
+
 // 初始化编译单元 CompileUnit
-static void initCompileUnit(Lexer *lexer, CompileUnit *cu, CompileUnit *enclosingUnit, bool isMethod)
+static void
+initCompileUnit(Lexer *lexer, CompileUnit *cu, CompileUnit *enclosingUnit, bool isMethod)
 {
     lexer->curCompileUnit = cu;
     cu->curLexer = lexer;
@@ -171,6 +258,32 @@ static void writeOpCodeShortOperand(CompileUnit *cu, OpCode opCode, int operand)
     writeOpCode(cu, opCode);
     // 2. 写操作数
     writeShortOperand(cu, operand);
+}
+
+// 向编译单元中 fn->constants 中添加常量，并返回索引
+static uint32_t addConstant(CompileUnit *cu, Value constant)
+{
+    ValueBufferAdd(cu->curLexer->vm, &cu->fn->constants, constant);
+    return cu->fn->constants.count - 1;
+}
+
+// 生成加载常量的指令
+static void emitLoadConstant(CompileUnit *cu, Value constant)
+{
+    // 1. 将常量通过 addConstant 加载到常量表，并获取其在常量表中的索引 index
+    int index = addConstant(cu, constant);
+    // 2. 生成操作符为 OPCODE_LOAD_CONSTANT，操作数为 index 的指令
+    writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, index);
+}
+
+// 字面量（即常量，包括数字、字符串）的 nud 方法
+// 即在语法分析时，遇到常量时，就调用该 nud 方法直接生成将该常量添加到运行时栈的指令即可
+static void literal(CompileUnit *cu, bool canAssign UNUSED)
+{
+    // 是 preToken 的原因：
+    // 当进入到某个 token 的 led/nud 方法时，curToken 为该 led/nud 方法所属 token 的右边的 token
+    // 所以 led/nud 所属的 token 就是 preToken
+    emitLoadConstant(cu, cu->curLexer->preToken.value);
 }
 
 // 在模块 objModule 中定义名为 name，值为 value 的模块变量
