@@ -200,6 +200,6 @@ Class *newRawClass(VM *vm, const char *name, uint32_t fieldNum);
 
 // 获取对象所属的类
 // inline 在函数定义之前（函数声明前无用），表示该函数为内联函数，即会将函数中的代码直接内联到调用的函数中，省去了调用独立函数的开销
-inline Class *getClassOfObj(VM *vm, Value object)
+inline Class *getClassOfObj(VM *vm, Value object);
 
 #endif
