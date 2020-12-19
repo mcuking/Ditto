@@ -135,7 +135,8 @@ typedef struct
     }
 
 // 符号绑定规则的数组
-// 按照 lexer.h 中定义的 TokenType 中各种类型的 token 顺序添加对应的符号绑定规则
+// 按照 lexer.h 中定义的枚举 TokenType 中各种类型的 token 顺序，来添加对应的符号绑定规则
+// 之所以要按照顺序填写，是为了方便用枚举值从 Rules 数组中找到某个类型的 token 的对应的符号绑定规则
 SymbolBindRule Rules[] = {
     UNUSED_RULE,            // TOKEN_INVALID
     PREFIX_SYMBOL(literal), // TOKRN_NUM
@@ -284,6 +285,236 @@ static void literal(CompileUnit *cu, bool canAssign UNUSED)
     // 当进入到某个 token 的 led/nud 方法时，curToken 为该 led/nud 方法所属 token 的右边的 token
     // 所以 led/nud 所属的 token 就是 preToken
     emitLoadConstant(cu, cu->curLexer->preToken.value);
+}
+
+// 将方法的签名对象转化成字符串
+static uint32_t sign2String(Signature *sign, char *buf)
+{
+    uint32_t pos = 0;
+
+    // 将方法签名中的方法名 xxx 复制到 buf 中
+    memcpy(buf[pos], sign->name, sign->length);
+    pos += sign->length;
+
+    switch (sign->type)
+    {
+    // getter 方法无参数，形式是： xxx
+    case SIGN_GETTER:
+        break;
+    // setter 方法只有一个参数，形式是：xxx=(_)
+    case SIGN_SETTER:
+        buf[pos++] = '=';
+        buf[pos++] = '(';
+        buf[pos++] = '_';
+        buf[pos++] = ')';
+        break;
+    // 构造函数和普通方法形式是：xxx(_,...)
+    case SIGN_CONSTRUCT:
+    case SIGN_METHOD:
+        buf[pos++] = '(';
+        uint32_t idx = 0;
+        while (idx < sign->argNum)
+        {
+            buf[pos++] = '_';
+            buf[pos++] = ',';
+            idx++;
+        }
+
+        if (idx == 0)
+        {
+            // 说明没有参数
+            buf[pos++] = ')';
+        }
+        else
+        {
+            // 有参数的话则将最后多出来的 , 覆盖成 )
+            buf[pos - 1] = ')';
+        }
+        break;
+    // subscribe 方法形式：xxx[_,...]
+    case SIGN_SUBSCRIPT:
+        buf[pos++] = '[';
+        uint32_t idx = 0;
+        while (idx < sign->argNum)
+        {
+            buf[pos++] = '_';
+            buf[pos++] = ',';
+            idx++;
+        }
+
+        if (idx == 0)
+        {
+            // 说明没有参数
+            buf[pos++] = ']';
+        }
+        else
+        {
+            // 有参数的话则将最后多出来的 , 覆盖成 )
+            buf[pos - 1] = ']';
+        }
+        break;
+    // subscribe setter 方法形式：xxx[_,...] = (_)
+    // 这里处理的是等号左边的参数，因此需要减 1
+    case SIGN_SUBSCRIPT_SETTER:
+        buf[pos++] = '[';
+        uint32_t idx = 0;
+        while (idx < sign->argNum - 1)
+        {
+            buf[pos++] = '_';
+            buf[pos++] = ',';
+            idx++;
+        }
+
+        if (idx == 0)
+        {
+            // 说明没有参数
+            buf[pos++] = ']';
+        }
+        else
+        {
+            // 有参数的话则将最后多出来的 , 覆盖成 )
+            buf[pos - 1] = ']';
+        }
+        buf[pos++] = '=';
+        buf[pos++] = '(';
+        buf[pos++] = '_';
+        buf[pos++] = ')';
+        break;
+    default:
+        break;
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
+// 语法分析的核心方法 expression，用来解析表达式结果
+// 只是负责调用符号的 led 或 nud 方法，不负责语法分析，至于 led 或 nud 方法中是否有语法分析功能，则是该符号自己协调的事
+// 这里以中缀运算符表达式 aSwTeUg 为例进行注释讲解
+// 其中大写字符代表运算符，小写字符代表操作数
+// expression 开始由运算符 S 调用的，所以 rbp 为运算符 S 的绑定权值
+static void expression(CompileUnit *cu, BindPower rbp)
+{
+    // expression 是由运算符 S 调用的，对于中缀运算符来说，此时 curToken 为操作数 w
+    // 找到操作数 w 的 nud 方法
+    DenotationFn nud = Rules[cu->curLexer->curToken.type].nud;
+
+    ASSERT(nud != NULL, "nud is NULL!");
+
+    // 获取下一个 token
+    // 执行后 curToken 为运算符 T
+    getNextToken(cu->curLexer);
+
+    // canAssign 用于判断是否具备可赋值的环境
+    // 即当运算符 S 的绑定权值 rbp 小于 BP_ASSIGN 时，才能保证左值属于赋值运算符
+    bool canAssign = rbp < BP_ASSIGN;
+    // 执行操作数 w 的 nud 方法，计算操作数 w 的值
+    nud(cu, canAssign);
+
+    // rbp 为运算符 S 的对操作数的绑定权值
+    // 因 curToken 目前为运算符 T，所以 Rules[cu->curLexer->curToken.type].lbp 为运算符 T 对操作数的绑定权值
+    // 如果运算符 S 绑定权值大于运算符 T 绑定权值，则操作数 w 为运算符 S 的右操作数，则不进入循环，直接将操作数 w 作为运算符 S 的右操作数返回
+    // 反之，则操作数 w 为运算符 T 的左操作数，进入循环
+    while (rbp < Rules[cu->curLexer->curToken.type].lbp)
+    {
+        // curToken 为运算符 T，因此该函数是获取运算符 T 的 led 方法
+        DenotationFn led = Rules[cu->curLexer->curToken.type].led;
+
+        // 获取下一个 token
+        // 执行后 curToken 为操作数 e
+        getNextToken(cu->curLexer);
+
+        // 执行运算符 T 的 led 方法，去构建以运算符 T 为根，以操作数 w 为左节点的语法树
+        // 右节点是通过 led 方法里继续递归调用 expression 去解析的
+        led(cu, canAssign);
+    }
+}
+
+// 基于方法签名 生成 调用方法的指令
+// 包括 callX 和 superX，即普通方法和基类方法
+static void emitCallBySignature(CompileUnit *cu, Signature *sign, OpCode opcode)
+{
+    // MAX_SIGN_LEN 为方法签名的最大长度
+    char signBuffer[MAX_SIGN_LEN];
+    // 将方法的签名对象转化成字符串 signBuffer
+    uint32_t length = sign2String(sign, signBuffer);
+
+    // 确保名为 signBuffer 的方法已经在 cu->curLexer->vm->allMethodNames 中，没有查找到，则向其中添加
+    int symbolIndex = ensureSymbolExist(cu->curLexer->vm, &cu->curLexer->vm->allMethodNames, signBuffer, length);
+
+    // 写入调用方法的指令，其中：
+    // 操作码为 callX 或 superX，X 表示调用方法的参数个数，例如 OPCODE_CALL15
+    // 操作数为方法在 cu->curLexer->vm->allMethodNames 的索引值
+    writeOpCodeShortOperand(cu, opcode + sign->argNum, symbolIndex);
+
+    // 如果是调用基类方法，则再写入一个值为 VT_NULL 的操作数，为基类方法预留一个空位
+    // 因为基类方法可能是在子类方法之后定义，因此不能保证基类方法已经被编译完成
+    // 将来绑定方法是在装入基类
+    if (opcode == OPCODE_SUPER0)
+    {
+        writeShortOperand(cu, addConstant(cu, VT_TO_VALUE(VT_NULL)));
+    }
+}
+
+// 基于方法签名 生成 调用方法的指令
+// 仅限于 callX，即普通方法
+// 方法名 name  方法名长度 length  方法参数个数 argNum
+static void emitCall(CompileUnit *cu, const char *name, int length, int argNum)
+{
+    // 确保名为 name 的方法已经在 cu->curLexer->vm->allMethodNames 中，没有查找到，则向其中添加
+    int symbolIndex = ensureSymbolExist(cu->curLexer->vm, &cu->curLexer->vm->allMethodNames, name, length);
+    // 写入调用方法的指令，其中：
+    // 操作码为 callX，X 表示调用方法的参数个数，例如 OPCODE_CALL15
+    // 操作数为方法在 cu->curLexer->vm->allMethodNames 的索引值
+    writeOpCodeShortOperand(cu, OPCODE_CALL0 + argNum, symbolIndex);
+}
+
+// 中缀运算符（例如 + - * /）的 led 方法
+// 即调用此方法对中缀运算符进行语法分析
+// 切记，进入任何一个符号的 led 或 nud 方法时，preToken 都是该方法所属符号（即操作符），curToken 为该方法所属符号的右边符号（即操作数）
+static void infixOperator(CompileUnit *cu, bool canAssign UNUSED)
+{
+    // 获取该方法所属符号对应的绑定规则
+    SymbolBindRule *rule = &Rules[cu->curLexer->preToken.type];
+
+    // 对于中缀运算符，其对左右操作数的绑定权值相同
+    BindPower rbp = rule->lbp;
+    // 解析操作符的右操作数
+    expression(cu, rbp);
+
+    // 例如表达式 3+2 就会被视为 3.+(2)
+    // 其中 3 为对象，+ 是方法，2 为参数
+    // 即 op1.operator(op2)，只有一个参数 op2
+    // 下面定义该方法对应的签名
+    Signature sign = {
+        SIGN_METHOD,      // 类型为普通方法
+        rule->id,         // 方法名即操作运算符的名字
+        strlen(rule->id), // 方法名长度即操作运算符的名字长度
+        1                 // 参数只有一个，即 op2。实际上在虚拟机中会有个默认参数，即调用该方法的对象实例，在这里就是 op1，所以就可以计算 op1 和 op2 的结果
+    };
+
+    // 基于该中缀操作符方法的签名 生成 调用该中缀运算符方法的指令
+    // 方法的参数就是该符号的右操作数，或者右操作树的计算结果
+    emitCallBySignature(cu, &sign, OPCODE_CALL0);
+}
+
+// 前缀运算符（例如 ! -）的 nud 方法
+// 即调用此方法对前缀运算符进行语法分析
+static void unaryOperator(CompileUnit *cu, bool canAssign UNUSED)
+{
+    // 获取该方法所属符号对应的绑定规则
+    SymbolBindRule *rule = &Rules[cu->curLexer->preToken.type];
+
+    // 解析操作符的右操作数，绑定权值为 BP_UNARY，绑定权值较高
+    // 不能用前缀运算符的对左操作数的绑定权值（其值最低，为 BP_NONE）
+    // 因为前缀运算符只关心右操作数，不关系左操作数
+    expression(cu, BP_UNARY);
+
+    // 生成调用该前缀运算符方法的指令
+    // 前缀运算符方法的名字长度，即 strlen(rule->id) 为 1
+    // 前缀运算符方法的参数为 0
+    // 例如表达式 !3 会被视为 3.!，即 3 调用 ! 操作符对应的方法
+    // 实际上在虚拟机中会有个默认参数，即调用该方法的对象实例，在这里就是数字对象 3，所以就可以计算 3 取反的结果
+    emitCall(cu, rule->id, strlen(rule->id), 0);
 }
 
 // 在模块 objModule 中定义名为 name，值为 value 的模块变量
