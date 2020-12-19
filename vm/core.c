@@ -346,6 +346,21 @@ int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length)
     return table->count - 1;
 }
 
+// 确保符号 symbol 已经添加到符号表 table 中，如果查找没有，则向其中添加
+int ensureSymbolExist(VM *vm, SymbolTable *table, const char *symbol, uint32_t length)
+{
+    // 先从 table 中查找 symbol
+    int symbolIndex = getIndexFromSymbolTable(table, symbol, length);
+
+    // 如果没找到·，则添加 symbol 到 table 中，然后返回其索引
+    if (symbolIndex == -1)
+    {
+        return addSymbol(vm, table, symbol, length);
+    }
+    // 如果找到，则返回其索引
+    return symbolIndex;
+}
+
 // 在 objModule 模块中定义名为 name 的类
 static Class *defineClass(VM *vm, ObjModule *objModule, const char *name)
 {
