@@ -144,8 +144,7 @@ SymbolBindRule Rules[] = {
 };
 
 // 初始化编译单元 CompileUnit
-static void
-initCompileUnit(Lexer *lexer, CompileUnit *cu, CompileUnit *enclosingUnit, bool isMethod)
+static void initCompileUnit(Lexer *lexer, CompileUnit *cu, CompileUnit *enclosingUnit, bool isMethod)
 {
     lexer->curCompileUnit = cu;
     cu->curLexer = lexer;
@@ -385,6 +384,82 @@ static uint32_t sign2String(Signature *sign, char *buf)
     }
     buf[pos] = '\0';
     return pos;
+}
+
+// 添加局部变量到编译单元 cu 的 localVars 数组中，并返回该变量的索引值
+static uint32_t addLocalVar(CompileUnit *cu, const char *name, uint32_t length)
+{
+    LocalVar *var = &(cu->localVars[cu->localVarNum]);
+    var->name = name;
+    var->name = length;
+    var->scopeDepth = cu->scopeDepth;
+    var->isUpvalue = false;
+    return cu->localVarNum++;
+}
+
+// 声明局部变量（最后会调用上面的 addLocalVar）
+static declareLocalVar(CompileUnit *cu, const char *name, uint32_t length)
+{
+    // 一个编译单元中所有局部作用域的局部变量总数不能超过 MAX_LOCAL_VAR_NUM，即 128 个
+    if (cu->localVarNum > MAX_LOCAL_VAR_NUM)
+    {
+        COMPILE_ERROR(cu->curLexer, "the max amount of local variable of one compile unit (such as function) is %d", MAX_LOCAL_VAR_NUM);
+    }
+
+    // 检测当前作用域是否存在同名变量
+    // 之所以倒序遍历，是因为 scopeDepth 是随着作用域越深（越局部）而越大，而 localVars 数组中的局部变量是按照作用域的深度递增排列，
+    // 即越深的作用变量越排在 localVars 数组中的后面
+    // 所以只需要从后向前遍历，最后的变量始终是当前作用域的变量
+    int idx = (int)cu->localVarNum - 1;
+
+    while (idx >= 0)
+    {
+        LocalVar *var = &(cu->localVars[idx]);
+
+        // 当向前遍历时发现已经进入到父级作用域，则退出
+        // 因为只需要检测同一个局部作用域下是否存在变量名冲突
+        if (var->scopeDepth < cu->scopeDepth)
+        {
+            break;
+        }
+
+        // 如果在同一个局部作用域下之前已声明同名的局部变量，则报错
+        if (var->length == length && memcmp(var->name, name, length) == 0)
+        {
+            char id[MAX_ID_LEN] = {'\0'};
+            memcpy(id, name, length);
+            COMPILE_ERROR(cu->curLexer, "identifier \"%s\" redefinition!", id);
+        }
+
+        idx--;
+    }
+
+    // 如果既没有超出最大局部变量数量限制，也没有同名局部变量已声明
+    // 则直接添加局部变量到 cu 的 localVars 数组中
+    return addLocalVar(cu, name, length);
+}
+
+// 根据作用域的类型声明变量，即声明模块变量还是局部变量
+static int declareVariable(CompileUnit *cu, const char *name, uint32_t length)
+{
+    // 如果为模块作用域，则声明为模块变量
+    if (cu->scopeDepth == -1)
+    {
+        // 先将变量值初始化为 NULL
+        int index = defineModuleVar(cu->curLexer->vm, cu->curLexer->curModule, name, length, VT_TO_VALUE(VT_NULL));
+
+        // 如果同名模块变量为已经定义，则报错
+        if (index == -1)
+        {
+            char id[MAX_ID_LEN] = {'\0'};
+            memcpy(id, name, length);
+            COMPILE_ERROR(cu->curLexer, "identifier \"%s\" redefinition!", id);
+        }
+        return index;
+    }
+
+    // 否则为局部作用域，声明为局部变量
+    return declareLocalVar(cu, name, length);
 }
 
 // 语法分析的核心方法 expression，用来解析表达式结果
