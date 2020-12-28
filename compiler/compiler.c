@@ -462,6 +462,70 @@ static int declareVariable(CompileUnit *cu, const char *name, uint32_t length)
     return declareLocalVar(cu, name, length);
 }
 
+//下面调用下面三个生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
+// 例如 test(a)，preToken 为 test，curToken 为 (
+// 在调用方 compileMethod 中，方法名已经获取了，只需要下面的函数获取符号方法的类型、方法参数个数
+
+// 为单运算符的符号方法生成方法签名
+static void unaryMethodSignature(CompileUnit *cu UNUSED, Signature *sign)
+{
+    // 单运算符的符号方法类型 Getter 方法，且没有方法参数
+    sign->type = SIGN_GETTER;
+}
+
+// 为中缀运算符的符号方法生成方法签名
+static void infixMethodSignature(CompileUnit *cu UNUSED, Signature *sign UNUSED)
+{
+    // 中缀运算符的符号方法类型普通方法
+    sign->type = SIGN_METHOD;
+
+    // 方法参数个数为 1 个
+    // 例如 2 + 3 相当于 2.+(3) ，其中 + 方法参数为 3，参数个数为 1
+    sign->argNum = 1;
+
+    // 期待当前 token 类型为 TOKEN_LEFT_PAREN，并读入下个 token
+    assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "expect '(' after infix operator!");
+
+    // 期待当前 token 类型为 TOKEN_ID，并读入下个 token
+    assertCurToken(cu->curLexer, TOKEN_ID, "expect variable name!");
+
+    // 声明中缀运算符的符号方法参数为变量
+    // 此处之所以是 preToken，是因为上个 assertCurToken 方法已经读入了参数
+    declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+
+    // 期待当前 token 类型为 TOKEN_RIGHT_PAREN，并读入下个 token
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after paramter!");
+}
+
+// 为既可做单运算符也可做中缀运算符的符号方法生成方法签名
+static void mixMethodSignature(CompileUnit *cu UNUSED, Signature *sign UNUSED)
+{
+    // 先默认为单运算符
+    sign->type = SIGN_GETTER;
+
+    // 如果 curToken 为 (，则为中缀运算符
+    // 注意此处 matchToken 方法中如果满足条件，会读入下一个 token
+    if (matchToken(cu->curLexer, TOKEN_LEFT_PAREN))
+    {
+        // 中缀运算符的符号方法类型普通方法
+        sign->type = SIGN_METHOD;
+
+        // 方法参数个数为 1 个
+        // 例如 2 + 3 相当于 2.+(3) ，其中 + 方法参数为 3，参数个数为 1
+        sign->argNum = 1;
+
+        // 期待当前 token 类型为 TOKEN_ID，并读入下个 token
+        assertCurToken(cu->curLexer, TOKEN_ID, "expect variable name!");
+
+        // 声明中缀运算符的符号方法参数为变量
+        // 此处之所以是 preToken，是因为上个 assertCurToken 方法已经读入了参数
+        declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+
+        // 期待当前 token 类型为 TOKEN_RIGHT_PAREN，并读入下个 token
+        assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after paramter!");
+    }
+}
+
 // 语法分析的核心方法 expression，用来解析表达式结果
 // 只是负责调用符号的 led 或 nud 方法，不负责语法分析，至于 led 或 nud 方法中是否有语法分析功能，则是该符号自己协调的事
 // 这里以中缀运算符表达式 aSwTeUg 为例进行注释讲解

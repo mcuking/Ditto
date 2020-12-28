@@ -620,7 +620,7 @@ void getNextToken(Lexer *lexer)
     }
 }
 
-// 如果当前 token 类型为期望类型，则读如下一个 token 并返回 true
+// 如果当前 token 类型为期望类型，则读入下一个 token 并返回 true
 // 否则直接返回 false
 bool matchToken(Lexer *lexer, TokenType expectTokenType)
 {
