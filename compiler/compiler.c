@@ -56,6 +56,22 @@ static const int opCodeSlotsUsed[] = {
 };
 #undef OPCODE_SLOTS
 
+// 按照所处作用域类型划分变量类型
+typedef enum
+{
+    VAR_SCOPE_INVALID,
+    VAR_SCOPE_LOCAL,   // 局部变量
+    VAR_SCOPE_UPVALUE, // upvalue 变量
+    VAR_SCOPE_MODULE   // 模块变量
+} VarScopeType;
+
+// 变量结构体，用于内部变量查找
+typedef struct
+{
+    VarScopeType scopeType; // 变量类型
+    int index;              // 指向变量
+} Variable;
+
 // 定义操作符的绑定权值，即优先级
 // 从上到下优先级递增
 typedef enum
@@ -709,6 +725,45 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t len
     }
 
     return symbolIndex;
+}
+
+// 声明模块变量
+// 区别于 defineModuleVar 函数，该函数不做重定义检查，默认直接声明
+static int declareModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t length, Value value)
+{
+    ValueBufferAdd(vm, &objModule->moduleVarValue, value);
+    return addSymbol(vm, &objModule->moduleVarName, name, length);
+}
+
+// 获取包含 cu->enclosingClassBK 的最近的编译单元 CompileUnit，注：
+// 目前模块、类的方法、函数会有对应的编译单元，类本身没有
+// 在编译某个模块中的类的方法时，为了快捷地找到该方法所属的类的，
+// 会将该类的 ClassBookKeep 结构赋值给该模块对应的编译单元的 cu->enclosingClassBK
+// 这样类的方法要找到所属的类，只需要在对应的的编译单元的父编译单元（或父编译单元的父编译单元）即模块的编译单元中，找到其中的 cu->enclosingClassBK 即可
+static CompileUnit *getEnclosingClassBKUnit(CompileUnit *cu)
+{
+    while (cu != NULL)
+    {
+        if (cu->enclosingClassBK != NULL)
+        {
+            return cu;
+        }
+        // 向上找父编译单元，即直接外层编译单元
+        cu = cu->enclosingUnit;
+    }
+    return NULL;
+}
+
+// 获取包含 cu->enclosingClassBK 的最近的编译单元 CompileUnit 中的 cu->enclosingClassBK
+static ClassBookKeep *getEnclosingClassBK(CompileUnit *cu)
+{
+    CompileUnit *ncu = getEnclosingClassBKUnit(cu);
+
+    if (ncu != NULL)
+    {
+        return ncu->enclosingClassBK;
+    }
+    return NULL;
 }
 
 // 编译程序
