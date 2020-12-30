@@ -67,7 +67,7 @@ typedef struct loop
     struct loop *enclosingLoop; // 外层循环
 } Loop;
 
-// 定义 ClassBookKeep 结构（用于记录类编译是的信息）
+// 定义 ClassBookKeep 结构（用于记录类编译时的信息）
 // 注：每定义一个方法，就将这个方法在 vm->allMethodNames 中的索引 index 写入到 instantMethods 或 staticMehthods 中，
 // 在写入之前先检查下 instantMethods 或 staticMehthods 是否已经存在 index，如果存在则报错重复定义，否则直接写入
 typedef struct
