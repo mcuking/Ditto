@@ -3,8 +3,7 @@
 #include "obj_fn.h"
 
 // 定义线程对象结构
-typedef struct
-{
+typedef struct {
     ObjHeader objHeader;
 
     Value *stack;           // 函数运行时栈的栈底

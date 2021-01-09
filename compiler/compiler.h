@@ -38,8 +38,7 @@ typedef struct
 } LocalVar;
 
 // 定义方法签名类型的枚举
-typedef enum
-{
+typedef enum {
     SIGN_CONSTRUCT,       // 构造函数
     SIGN_METHOD,          // 普通方法
     SIGN_GETTER,          // getter 方法
@@ -58,8 +57,7 @@ typedef struct
 } Signature;
 
 // 定义 Loop 结构（实现 while 会用到此结构）
-typedef struct loop
-{
+typedef struct loop {
     int condStartIndex;         // 循环中条件的地址
     int bodyStartIndex;         // 循环体起始地址
     int scopeDepth;             // 循环中若有 break，告诉他需要退出的作用域深度

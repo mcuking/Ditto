@@ -1,10 +1,10 @@
 #ifndef _VM_VM_H
 #define _VM_VM_H
-#include "common.h"
 #include "class.h"
+#include "common.h"
 #include "header_obj.h"
-#include "obj_thread.h"
 #include "obj_map.h"
+#include "obj_thread.h"
 
 // 为定义在 opcode.inc 中的操作码加上前缀 OPCODE_
 #define OPCODE_SLOTS(opcode, effect) OPCODE_##opcode,
@@ -14,21 +14,18 @@
 // 例如 OPCODE_SLOTS(LOAD_CONSTANT, 1) 返回的是 OPCODE_LOAD_CONSTANT
 // 然后将这些指令集合声明称枚举数据 OpCode
 // 之所以后面又将宏定义 OPCODE_SLOTS 取消定义，是因为其他地方也需要自定义 OPCODE_SLOTS 宏的逻辑，来获取不同的数据
-typedef enum
-{
+typedef enum {
 #include "opcode.inc"
 } OpCode;
 #undef OPCODE_SLOTS
 
 // 虚拟机执行结果
-typedef enum vmResult
-{
+typedef enum vmResult {
     VM_RESULT_SUCESS,
     VM_RESULT_ERROR
 } VMResult;
 
-struct vm
-{
+struct vm {
     Class *fnClass;
     Class *classOfClass;
     Class *objectClass;

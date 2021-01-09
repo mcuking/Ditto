@@ -1,15 +1,13 @@
-#include <string.h>
 #include "obj_string.h"
+#include "common.h"
 #include "util.h"
 #include "vm.h"
-#include "common.h"
+#include <string.h>
 
 // 将字符串值根据 fnv-1a 算法转成对应哈希值
-uint32_t hashString(char *str, uint32_t length)
-{
+uint32_t hashString(char *str, uint32_t length) {
     uint32_t hashCode = 2166136261, idx = 0;
-    while (idx < length)
-    {
+    while (idx < length) {
         hashCode ^= str[idx];
         hashCode *= 16777619;
         idx++;
@@ -18,15 +16,13 @@ uint32_t hashString(char *str, uint32_t length)
 }
 
 // 根据字符串对象中的值设置对应的哈希值
-void hashObjString(ObjString *objString)
-{
+void hashObjString(ObjString *objString) {
     objString->hashCode =
         hashString(objString->value.start, objString->value.length);
 }
 
 // 新建字符串对象
-ObjString *newObjString(VM *vm, const char *str, uint32_t length)
-{
+ObjString *newObjString(VM *vm, const char *str, uint32_t length) {
     //length为 0 时 str 必为 NULL  length 不为 0 时 str 不为 NULL
     ASSERT(length == 0 || str != NULL, "str length don't match str!");
 
@@ -37,8 +33,7 @@ ObjString *newObjString(VM *vm, const char *str, uint32_t length)
     ObjString *objString = ALLOCATE_EXTRA(vm, ObjString, length + 1);
 
     // 内存申请失败
-    if (objString == NULL)
-    {
+    if (objString == NULL) {
         MEM_ERROR("Allocating ObjString failed!");
     }
 
@@ -49,8 +44,7 @@ ObjString *newObjString(VM *vm, const char *str, uint32_t length)
 
     /** 2. 设置 value **/
     // 如果字符串非空，则需要赋值其内容
-    if (length > 0)
-    {
+    if (length > 0) {
         // 将 str 所指的字符串的 length 个字符复制到 objString->value.start 所指的字符串
         memcpy(objString->value.start, str, length);
     }

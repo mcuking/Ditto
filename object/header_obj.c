@@ -1,13 +1,12 @@
 #include "header_obj.h"
-#include "vm.h"
 #include "class.h"
+#include "vm.h"
 
 // TODO: 待后续解释
 DEFINE_BUFFER_METHOD(Value)
 
 // 初始化对象头
-void initObjHeader(VM *vm, ObjHeader *objHeader, ObjType objType, Class *class)
-{
+void initObjHeader(VM *vm, ObjHeader *objHeader, ObjType objType, Class *class) {
     objHeader->type = objType;
     // 对象是否可达初始化为 false，其值最终由垃圾回收机制设置
     objHeader->isAccess = false;

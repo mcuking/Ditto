@@ -16,30 +16,20 @@
 
 // 计算已经 UTF-8 编码的字符的 UTF-8 编码字节数，其中参数 byte 是 UTF-8 编码的高字节
 // 原理：判断 UTF-8 高字节的标记位中 1 的个数，有几个 1 就表示有几个字节
-uint32_t getByteNumOfEncodeUtf8(uint8_t byte)
-{
-    if ((byte & 0xc0) == 0x80)
-    {
+uint32_t getByteNumOfEncodeUtf8(uint8_t byte) {
+    if ((byte & 0xc0) == 0x80) {
         // byte 以 10 开头，说明是低字节
         return 0;
-    }
-    else if ((byte & 0xf8) == 0xf0)
-    {
+    } else if ((byte & 0xf8) == 0xf0) {
         // byte 以 11110 开头
         return 4;
-    }
-    else if ((byte & 0xf0) == 0xe0)
-    {
+    } else if ((byte & 0xf0) == 0xe0) {
         // byte 以 1110 开头
         return 3;
-    }
-    else if ((byte & 0xe0) == 0xc0)
-    {
+    } else if ((byte & 0xe0) == 0xc0) {
         // byte 以 110 开头
         return 2;
-    }
-    else
-    {
+    } else {
         // 最后就是单字节 UTF-8，等价于 ASCII 码
         return 1;
     }
@@ -47,28 +37,18 @@ uint32_t getByteNumOfEncodeUtf8(uint8_t byte)
 
 // 计算没有 UTF-8 编码的字符的 UTF-8 编码字节数
 // 原理：根据 UTF-8 不同字节数的编码所能表示的范围和 value 进行比较
-uint32_t getByteNumOfDecodeUtf8(int value)
-{
+uint32_t getByteNumOfDecodeUtf8(int value) {
     ASSERT(value > 0, "Can't encode negative value!");
 
-    if (value <= 0x7f)
-    {
+    if (value <= 0x7f) {
         return 1;
-    }
-    else if (value <= 0x7ff)
-    {
+    } else if (value <= 0x7ff) {
         return 2;
-    }
-    else if (value <= 0xffff)
-    {
+    } else if (value <= 0xffff) {
         return 3;
-    }
-    else if (value <= 0x10ffff)
-    {
+    } else if (value <= 0x10ffff) {
         return 4;
-    }
-    else
-    {
+    } else {
         return 0; // 超出范围返回 0
     }
 }
@@ -77,39 +57,29 @@ uint32_t getByteNumOfDecodeUtf8(int value)
 // 编码：就是按照 UTF-8 规则将数据装入 UTF-8 的字节中
 // 例如 2 字节的 UTF-8 编码形式为 "110xxxxx 10xxxxxx"，只需要将数据装入 x 所在的位即可
 // 本函数按照大端字节序编码，即先写数据的高字节，再写低字节
-uint8_t encodeUtf8(uint8_t *buf, int value)
-{
+uint8_t encodeUtf8(uint8_t *buf, int value) {
     ASSERT(value > 0, "Can't encode negative value!");
 
-    if (value <= 0x7f)
-    {
+    if (value <= 0x7f) {
         // 若单字节，则用 7 位 1 做位与运算
         *buf = value & 0x7f;
         return 1;
-    }
-    else if (value <= 0x7ff)
-    {
+    } else if (value <= 0x7ff) {
         *buf++ = 0xc0 | ((value & 0x7c0) >> 6);
         *buf = 0x80 | (value & 0x3f);
         return 2;
-    }
-    else if (value <= 0xffff)
-    {
+    } else if (value <= 0xffff) {
         *buf++ = 0xe0 | ((value & 0xf000) >> 12);
         *buf++ = 0x80 | ((value & 0xfc0) >> 6);
         *buf = 0x80 | (value & 0x3f);
         return 3;
-    }
-    else if (value <= 0x10ffff)
-    {
+    } else if (value <= 0x10ffff) {
         *buf++ = 0xf0 | ((value & 0x1c0000) >> 18);
         *buf++ = 0x80 | ((value & 0x3f000) >> 12);
         *buf++ = 0x80 | ((value & 0xfc0) >> 6);
         *buf = 0x80 | (value & 0x3f);
         return 4;
-    }
-    else
-    {
+    } else {
         NOT_REACHED();
         return 0; // 超出范围返回 0
     }
@@ -120,10 +90,8 @@ uint8_t encodeUtf8(uint8_t *buf, int value)
 // 参数 length 位序列的最大长度
 // 解码就是编码逆过程，判断是多少字节的编码，然后将其中数据部分读取出来
 // 例如 2 字节：就是将 "110xxxxx 10xxxxxx" 中 x 读出来
-int decodeUtf8(const uint8_t *bytePtr, uint32_t length)
-{
-    if (*bytePtr <= 0x7f)
-    {
+int decodeUtf8(const uint8_t *bytePtr, uint32_t length) {
+    if (*bytePtr <= 0x7f) {
         // 小于 127，说明是单字节的 ASCII 码，直接返回
         return *bytePtr;
     }
@@ -133,44 +101,34 @@ int decodeUtf8(const uint8_t *bytePtr, uint32_t length)
 
     // 先读取高字节，根据高字节的前 n 位判断相应字节数的 UTF-8 编码
     // 从而得到一共有几个字节，以及高字节的数据位放进 value 中
-    if ((*bytePtr & 0xe0) == 0xc0)
-    {
+    if ((*bytePtr & 0xe0) == 0xc0) {
         // 若是 2 字节的 UTF-8 (110 开头)
         value = *bytePtr & 0x1f;
         byteNum = 2;
-    }
-    else if ((*bytePtr & 0xf0) == 0xe0)
-    {
+    } else if ((*bytePtr & 0xf0) == 0xe0) {
         // 若是 3 字节的 UTF-8 (1110 开头)
         value = *bytePtr & 0x0f;
         byteNum = 3;
-    }
-    else if ((*bytePtr & 0xf8) == 0xf0)
-    {
+    } else if ((*bytePtr & 0xf8) == 0xf0) {
         // 若是 4 字节的 UTF-8 (11110 开头)
         value = *bytePtr & 0x07;
         byteNum = 4;
-    }
-    else
-    {
+    } else {
         // 非法编码
         return -1;
     }
 
     // 如果 UTF-8 被截断了就不再读过去了
-    if (byteNum > length)
-    {
+    if (byteNum > length) {
         return -1;
     }
 
     // 再读取低字节中的数据位
-    while (byteNum - 1 > 0)
-    {
+    while (byteNum - 1 > 0) {
         bytePtr++;
         byteNum--;
         // 低字节的前 2 位必须是 10
-        if ((*bytePtr & 0xc0) != 0x80)
-        {
+        if ((*bytePtr & 0xc0) != 0x80) {
             return -1;
         }
 

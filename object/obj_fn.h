@@ -17,15 +17,13 @@
 // 只要是指令流单元就可以用 ObjFn 表示，因此 ObjFn 泛指一切指令流单元
 
 // 定义函数中的调试的结构体
-typedef struct
-{
+typedef struct {
     char *fnName;
     IntBuffer lineNo;
 } FnDebug;
 
 // 定义自由变量 upvalue 对象的结构体
-typedef struct
-{
+typedef struct {
     ObjHeader objHeader;
     // 该指针用于指向对应的自由变量 upvalue，以供内部函数访问
     Value *localVarPtr;
@@ -40,8 +38,7 @@ typedef struct
 } ObjUpvalue;
 
 // 定义函数对象的结构体
-typedef struct
-{
+typedef struct {
     ObjHeader objHeader;
     // 用于存储函数编译后的指令流
     ByteBuffer instrStream;
@@ -66,8 +63,7 @@ typedef struct
 
 // 定义闭包对象的结构体
 // 闭包：引用自由变量的内部函数 + 引用的自由变量集合
-typedef struct
-{
+typedef struct {
     ObjHeader objHeader;
     // 引用自由变量的内部函数
     ObjFn *fn;
@@ -76,8 +72,7 @@ typedef struct
 } ObjClosure;
 
 // 定义函数调用帧栈的结构体
-typedef struct
-{
+typedef struct {
     // 程序计算器 PC，存储的是下一条指令的地址
     uint8_t *ip;
     // 待运行的闭包（函数引用了自由变量 upvalue 就变成了闭包）

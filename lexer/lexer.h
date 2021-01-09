@@ -1,13 +1,12 @@
 #ifndef _LEXER_LEXER_H
 #define _LEXER_LEXER_H
 #include "common.h"
-#include "vm.h"
-#include "meta_obj.h"
 #include "compiler.h"
+#include "meta_obj.h"
+#include "vm.h"
 
 // 定义脚本语言的所有 Token 类型
-typedef enum
-{
+typedef enum {
     // 未知类型
     TOKEN_UNKNOWN,
 
@@ -84,7 +83,7 @@ typedef enum
     TOKEN_QUESTION, // '?'
 
     // 文件结束标记,仅词法分析时使用
-    TOKEN_EOF // 'EOF'
+    TOKEN_EOF, // 'EOF'
 } TokenType;
 
 // 定义表示一个 Token 的结构体
@@ -98,8 +97,7 @@ typedef struct
 } Token;
 
 // 定义词法分析器的结构
-struct lexer
-{
+struct lexer {
     const char *file;        // 该指针指向源码文件名，用于标记当前正在编译哪个文件
     const char *sourceCode;  // 该指针指向源码字符串，将源码读出来后存储到某缓冲区，然后 sourceCode 指向该缓冲区
     const char *nextCharPtr; // 该指针指向 sourceCode 中下一个字符

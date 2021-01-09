@@ -1,10 +1,9 @@
-#include <stdlib.h>
 #include "vm.h"
 #include "core.h"
+#include <stdlib.h>
 
 // 初始化虚拟机
-void initVM(VM *vm)
-{
+void initVM(VM *vm) {
     // 记录已经分配的内存总和
     vm->allocatedBytes = 0;
     // 当前词法分析器初始化为 NULL
@@ -18,14 +17,12 @@ void initVM(VM *vm)
 };
 
 // 新建虚拟机
-VM *newVM()
-{
+VM *newVM() {
     // 为虚拟机申请内存，返回一个指针指向虚拟机
     VM *vm = (VM *)malloc(sizeof(VM));
 
     // 申请内存失败
-    if (vm == NULL)
-    {
+    if (vm == NULL) {
         MEM_ERROR("allocate VM failed!");
     }
 
