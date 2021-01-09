@@ -12,8 +12,7 @@ typedef struct
 } ObjModule;
 
 // 定义实例对象结构
-typedef struct
-{
+typedef struct {
     ObjHeader objHeader;
     // 同一个类的不同实例对象，不同点主要在于对象之间可以有不同的属性值，
     // 而属性个数、属性名以及方法，都是相同的，所以这些都放在类的结构中，

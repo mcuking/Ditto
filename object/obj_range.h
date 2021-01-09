@@ -4,8 +4,7 @@
 #include "vm.h"
 
 // 定义 range 对象结构
-typedef struct
-{
+typedef struct {
     ObjHeader objHeader;
     int from; // 范围的起始
     int to;   // 范围的结束

@@ -68,39 +68,33 @@ typedef struct
     void type##BufferAdd(VM *vm, type##Buffer *buf, type data);                   \
     void type##BufferClear(VM *vm, type##Buffer *buf);
 
-#define DEFINE_BUFFER_METHOD(type)                                                       \
-    void type##BufferInit(type##Buffer *buf)                                             \
-    {                                                                                    \
-        buf->datas = NULL;                                                               \
-        buf->count = buf->capacity = 0;                                                  \
-    }                                                                                    \
-    void type##BufferFillWrite(VM *vm, type##Buffer *buf, type data, uint32_t fillCount) \
-    {                                                                                    \
-        uint32_t newCounts = buf->count + fillCount;                                     \
-        if (newCounts > buf->capacity)                                                   \
-        {                                                                                \
-            size_t oldSize = buf->capacity * sizeof(type);                               \
-            buf->capacity = ceilToPowerOf2(newCounts);                                   \
-            size_t newSize = buf->capacity * sizeof(type);                               \
-            ASSERT(newSize > oldSize, "faint...memory allocate!");                       \
-            buf->datas = (type *)memManager(vm, buf->datas, oldSize, newSize);           \
-        }                                                                                \
-        uint32_t cnt = 0;                                                                \
-        while (cnt < fillCount)                                                          \
-        {                                                                                \
-            buf->datas[buf->count++] = data;                                             \
-            cnt++;                                                                       \
-        }                                                                                \
-    }                                                                                    \
-    void type##BufferAdd(VM *vm, type##Buffer *buf, type data)                           \
-    {                                                                                    \
-        type##BufferFillWrite(vm, buf, data, 1);                                         \
-    }                                                                                    \
-    void type##BufferClear(VM *vm, type##Buffer *buf)                                    \
-    {                                                                                    \
-        size_t oldSize = buf->capacity * sizeof(buf->datas[0]);                          \
-        memManager(vm, buf->datas, oldSize, 0);                                          \
-        type##BufferInit(buf);                                                           \
+#define DEFINE_BUFFER_METHOD(type)                                                         \
+    void type##BufferInit(type##Buffer *buf) {                                             \
+        buf->datas = NULL;                                                                 \
+        buf->count = buf->capacity = 0;                                                    \
+    }                                                                                      \
+    void type##BufferFillWrite(VM *vm, type##Buffer *buf, type data, uint32_t fillCount) { \
+        uint32_t newCounts = buf->count + fillCount;                                       \
+        if (newCounts > buf->capacity) {                                                   \
+            size_t oldSize = buf->capacity * sizeof(type);                                 \
+            buf->capacity = ceilToPowerOf2(newCounts);                                     \
+            size_t newSize = buf->capacity * sizeof(type);                                 \
+            ASSERT(newSize > oldSize, "faint...memory allocate!");                         \
+            buf->datas = (type *)memManager(vm, buf->datas, oldSize, newSize);             \
+        }                                                                                  \
+        uint32_t cnt = 0;                                                                  \
+        while (cnt < fillCount) {                                                          \
+            buf->datas[buf->count++] = data;                                               \
+            cnt++;                                                                         \
+        }                                                                                  \
+    }                                                                                      \
+    void type##BufferAdd(VM *vm, type##Buffer *buf, type data) {                           \
+        type##BufferFillWrite(vm, buf, data, 1);                                           \
+    }                                                                                      \
+    void type##BufferClear(VM *vm, type##Buffer *buf) {                                    \
+        size_t oldSize = buf->capacity * sizeof(buf->datas[0]);                            \
+        memManager(vm, buf->datas, oldSize, 0);                                            \
+        type##BufferInit(buf);                                                             \
     }
 
 #define SymbolTable StringBuffer
@@ -117,8 +111,7 @@ void symbolTableClear(VM *vm, SymbolTable *buffer);
 // 第四部分：通用报错函数
 
 // 定义全部的错误类型
-typedef enum
-{
+typedef enum {
     ERROR_IO,
     ERROR_MEM,
     ERROR_LEX,

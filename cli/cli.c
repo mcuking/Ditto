@@ -1,9 +1,9 @@
-#include <stdio.h>
-#include <string.h>
+#include "class.h"
+#include "core.h"
 #include "lexer.h"
 #include "vm.h"
-#include "core.h"
-#include "class.h"
+#include <stdio.h>
+#include <string.h>
 
 char *tokenArray[] = {
     "UNKNOWN",
@@ -60,16 +60,15 @@ char *tokenArray[] = {
     "LESS",
     "LESS_EQUAL",
     "QUESTION",
-    "EOF"};
+    "EOF",
+};
 
 // 运行脚本文件
-static void runFile(const char *path)
-{
+static void runFile(const char *path) {
     // 搜索字符串 path 中最后一次出现 / 的位置
     const char *lastSlash = strrchr(path, '/');
     // 如果不存在 /，则说明文件就在当前目录下，无需设置 rootDir
-    if (lastSlash != NULL)
-    {
+    if (lastSlash != NULL) {
         // 申请 lastSlash - path + 2 个字节大小的内存空间，root 指向该空间
         // 即用字符串最后一个 / 的地址减去字符串的首地址，再加 1，就是 / 左边所有的字符
         // 例如 examples/demo/a.di 中 examples/demo 的长度
@@ -89,14 +88,10 @@ static void runFile(const char *path)
     executeModule(vm, OBJ_TO_VALUE(newObjString(vm, path, strlen(path))), sourceCode);
 }
 
-int main(int argc, const char **argv)
-{
-    if (argc == 1)
-    {
+int main(int argc, const char **argv) {
+    if (argc == 1) {
         // TODO: 调用执行脚本语言的命令行
-    }
-    else
-    {
+    } else {
         // 运行脚本文件
         runFile(argv[1]);
     }

@@ -1,16 +1,15 @@
 #ifndef _OBJECT_CLASS_H
 #define _OBJECT_CLASS_H
 #include "common.h"
-#include "utils.h"
 #include "header_obj.h"
-#include "obj_string.h"
 #include "obj_fn.h"
-#include "obj_range.h"
 #include "obj_list.h"
+#include "obj_range.h"
+#include "obj_string.h"
+#include "utils.h"
 
 // 方法类型
-typedef enum
-{
+typedef enum {
     MT_NONE,      // 空方法
     MT_PRIMITIVE, // 用 C 实现的原生方法
     MT_SCRIPT,    // 脚本语言中实现的方法
@@ -146,8 +145,7 @@ typedef struct
 {
     // union 中的值由 type 的值决定
     MethodType type;
-    union
-    {
+    union {
         // 指向脚本语言方法关联的 C 方法
         // 即脚本语言方法其实是由原生方法实现的
         // 当 type 为 MT_PRIMITIVE 时有效
@@ -179,8 +177,7 @@ struct class
 };
 
 // Bits64 用于存储 64 位数据
-typedef union
-{
+typedef union {
     uint64_t bits64;
     uint32_t bits32[2];
     double num;

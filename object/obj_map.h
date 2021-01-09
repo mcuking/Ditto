@@ -5,8 +5,7 @@
 // map 对象装载率，即容量利用率，即 map 对象中 Entry 的实际数量占 map 对象中  Entry 的容量 的百分比
 #define MAP_LOAD_PERCENT 0.8
 
-typedef struct
-{
+typedef struct {
     Value key;
     Value value;
 } Entry; // 键值对

@@ -1,10 +1,9 @@
 #include "obj_thread.h"
-#include "vm.h"
 #include "class.h"
+#include "vm.h"
 
 // 为线程 objThread 中运行的闭包函数 objClosure 准备运行时栈
-void prepareFrame(ObjThread *objThread, ObjClosure *objClosure, Value *stackStart)
-{
+void prepareFrame(ObjThread *objThread, ObjClosure *objClosure, Value *stackStart) {
     // 如果分配的帧栈超出最大容量，则报错
     ASSERT(objThread->frameCapacity > objThread->usedFrameNum, "frame not enough!");
 
@@ -21,8 +20,7 @@ void prepareFrame(ObjThread *objThread, ObjClosure *objClosure, Value *stackStar
 }
 
 // 重置线程对象，即为闭包 objClosure 中的函数初始化运行时栈
-void resetThread(ObjThread *objThread, ObjClosure *objClosure)
-{
+void resetThread(ObjThread *objThread, ObjClosure *objClosure) {
     // 将线程的运行时栈的栈顶 esp 置为栈底 stack
     objThread->esp = objThread->stack;
     objThread->openUpvalues = NULL;
@@ -38,8 +36,7 @@ void resetThread(ObjThread *objThread, ObjClosure *objClosure)
 }
 
 // 新建线程对象，线程中运行的是闭包 objClosure 中的函数
-ObjHeader *newObjThread(VM *vm, ObjClosure *objClosure)
-{
+ObjHeader *newObjThread(VM *vm, ObjClosure *objClosure) {
     // 闭包 objClosure 为空则报错
     ASSERT(objClosure != NULL, "objClosure is NULL");
 
@@ -47,8 +44,7 @@ ObjHeader *newObjThread(VM *vm, ObjClosure *objClosure)
     ObjThread *objThread = ALLOCATE(vm, ObjThread);
 
     // 申请内存失败
-    if (objThread == NULL)
-    {
+    if (objThread == NULL) {
         MEM_ERROR("allocate ObjThread failed!");
     }
 

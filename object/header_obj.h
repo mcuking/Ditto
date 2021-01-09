@@ -2,8 +2,7 @@
 #define _OBJECT_HEADER_OBJ_H
 #include "utils.h"
 
-typedef enum
-{
+typedef enum {
     OT_CLASS,    // 类
     OT_LIST,     // 列表
     OT_MAP,      // 散列数组
@@ -18,8 +17,7 @@ typedef enum
 } ObjType;
 
 // 对象头，用于记录元信息和垃圾回收
-typedef struct objHeader
-{
+typedef struct objHeader {
     ObjType type;           // 对象类型
     bool isAccess;          // 对象是否可达，用于垃圾回收
     Class *class;           // 指向对象所属的类
@@ -27,8 +25,7 @@ typedef struct objHeader
 } ObjHeader;
 
 // 值类型
-typedef enum
-{
+typedef enum {
     VT_UNDEFINED, // 未定义
     VT_NULL,      // 空
     VT_FALSE,     // 布尔假
@@ -43,8 +40,7 @@ typedef struct
 {
     // union 中的值由 type 的值决定
     ValueType type; // 值类型
-    union
-    {
+    union {
         double num;
         ObjHeader *objHeader;
     };
