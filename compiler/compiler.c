@@ -390,7 +390,7 @@ static declareLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
 
     // 检测当前作用域是否存在同名变量
     // 之所以倒序遍历，是因为 scopeDepth 是随着作用域越深（越局部）而越大，而 localVars 数组中的局部变量是按照作用域的深度递增排列，
-    // 即越深的作用变量越排在 localVars 数组中的后面
+    // 即越深的作用域变量越排在 localVars 数组中的后面
     // 所以只需要从后向前遍历，最后的变量始终是当前作用域的变量
     int idx = (int)cu->localVarNum - 1;
 
@@ -436,6 +436,21 @@ static int declareVariable(CompileUnit *cu, const char *name, uint32_t length) {
 
     // 否则为局部作用域，声明为局部变量
     return declareLocalVar(cu, name, length);
+}
+
+// 查找局部变量
+static int findLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
+    // 内层作用域的变量会覆盖外层
+    // 而 localVars 数组中的局部变量是按照作用域的深度递增排列，即越深的作用域变量越排在 localVars 数组中的后面
+    // 所以只需要从后向前遍历，即从内层向外找
+    int index = cu->localVarNum - 1;
+    while (index >= 0) {
+        if (cu->localVars[index].length == length && memcmp(cu->localVars[index].name, name, length) == 0) {
+            return index;
+        }
+        index--;
+    }
+    return -1;
 }
 
 //下面调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
