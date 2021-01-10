@@ -699,6 +699,49 @@ static ClassBookKeep *getEnclosingClassBK(CompileUnit *cu) {
     return NULL;
 }
 
+// 处理函数/方法实参
+// 基于实参列表生成加载实参到运行时栈中的指令
+// 虚拟机执行指令后，会从左到右依次将实参压入到运行时栈，被调用的函数/方法会从栈中获取参数
+// 注：expression 就是用来计算表达式，即会生成计算表达式的一系列指令，虚拟机在执行这些指令后，就会计算出表达式的结果
+static void processArgList(CompileUnit *cu, Signature *sign) {
+    // 确保实参列表不为空
+    ASSERT(cu->curLexer->curToken.type != TOKEN_RIGHT_PAREN &&
+               cu->curLexer->curToken.type != TOKEN_RIGHT_BRACKET,
+           "empty argument list!");
+
+    do {
+        // 确保实参个数不超过 MAX_ARG_NUM
+        if (++sign->argNum > MAX_ARG_NUM) {
+            COMPILE_ERROR(cu->curLexer, "the max number of argument is %d", MAX_ARG_NUM);
+        }
+
+        // 基于实参列表生成加载实参到运行时栈中的指令
+        expression(cu, BP_LOWEST);
+    } while (matchToken(cu->curLexer, TOKEN_COMMA));
+}
+
+// 处理函数/方法形参
+// 将形参列表中的形参声明为函数/方法中的局部变量
+static void processParaList(CompileUnit *cu, Signature *sign) {
+    // 确保形参列表不为空
+    ASSERT(cu->curLexer->curToken.type != TOKEN_RIGHT_PAREN &&
+               cu->curLexer->curToken.type != TOKEN_RIGHT_BRACKET,
+           "empty argument list!");
+
+    do {
+        // 确保形参个数不超过 MAX_ARG_NUM
+        if (++sign->argNum > MAX_ARG_NUM) {
+            COMPILE_ERROR(cu->curLexer, "the max number of argument is %d", MAX_ARG_NUM);
+        }
+
+        // 确保形参对应的 token 类型为变量名
+        assertCurToken(cu->curLexer, TOKEN_ID, "expect variable name!");
+
+        // 将形参列表中的形参声明为函数/方法中的局部变量
+        declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+    } while (matchToken(cu->curLexer, TOKEN_COMMA));
+}
+
 // 编译程序
 // TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
