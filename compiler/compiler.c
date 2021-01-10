@@ -438,13 +438,100 @@ static int declareVariable(CompileUnit *cu, const char *name, uint32_t length) {
     return declareLocalVar(cu, name, length);
 }
 
-//下面调用下面三个生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
+//下面调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
 // 例如 test(a)，preToken 为 test，curToken 为 (
-// 在调用方 compileMethod 中，方法名已经获取了，只需要下面的函数获取符号方法的类型、方法参数个数
+// 在调用方 compileMethod 中，方法名已经获取了，同时方法签名已经创建了，只需要下面的函数获取符号方法的类型、方法参数个数，来完善方法签名
+
+// 判断是否为 setter 方法，如果是则将方法签名设置成 setter 类型，且返回 true，否则返回 false
+// setter 方法判断依据是是否符合 xxx=(_)
+static bool trySetter(CompileUnit *cu UNUSED, Signature *sign) {
+    // 方法名后面没有 = ，则可判断不是 setter 方法
+    if (!matchToken(cu->curLexer, TOKEN_ASSIGN)) {
+        return false;
+    }
+
+    if (sign->type == SIGN_SUBSCRIPT) {
+        // subscribe setter 方法形式：xxx[_,...] = (_)
+        sign->type = SIGN_SUBSCRIPT_SETTER;
+    } else {
+        // setter 方法形式：xxx = (_)
+        sign->type = SIGN_SETTER;
+    }
+
+    // = 后面必须为 (
+    assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "expect '(' after '='!");
+
+    // ( 后面必须为标识符
+    assertCurToken(cu->curLexer, TOKEN_ID, "expect identifier");
+
+    // 声明形参为局部变量
+    // subscribe setter 或者 setter 方法只有一个参数
+    declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+
+    // 标识符后面必须为 )
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after argument list!");
+
+    // 方法签名中的 argNum 加 1
+    sign->argNum++;
+
+    return true;
+}
+
+// 为标识符生成方法签名
+static void idMethodSignature(CompileUnit *cu UNUSED, Signature *sign) {
+    // 先默认设置成 getter 类型方法
+    sign->type = SIGN_GETTER;
+
+    // 如果方法签名的名字为 new 则说明是构造函数，即形式为 new(_,...)
+    if (sign->length == 3 && memcmp(sign->name, "new", 3) == 0) {
+        // 构造函数的方法名后面不能接 =
+        if (matchToken(cu->curLexer, TOKEN_ASSIGN)) {
+            COMPILE_ERROR(cu->curLexer, "constructor shoudn't be setter!");
+        }
+
+        // 构造函数的方法名 new 后面必须为 (
+        if (!matchToken(cu->curLexer, TOKEN_LEFT_PAREN)) {
+            COMPILE_ERROR(cu->curLexer, "constructor must be method!");
+        }
+
+        sign->type = SIGN_CONSTRUCT;
+
+        // 如果形参后面为 )，说明构造函数没有参数则直接返回，不用走后面声明形参的逻辑
+        // 注意此时的 preToken 已经是 ( 了，因为上面有判断 new 后面是否有 ( 的逻辑，满足条件才会走到这里， matchToken 满足条件会读入下一个 token
+        if (matchToken(cu->curLexer, TOKEN_RIGHT_PAREN)) {
+            return;
+        }
+    } else {
+        // 若不是构造函数，则判断是否为 setter 或者 subscribe setter
+        // 如果是，trySetter 中已经将 type 设置了，并且处理了，直接返回即可
+        if (trySetter(cu, sign)) {
+            return;
+        }
+
+        // 如果方法名后面不是 (，则说明是 getter 类型方法，开头已经默认设置，且 getter 方法没有参数，所以直接返回即可
+        if (!matchToken(cu->curLexer, TOKEN_LEFT_BRACKET)) {
+            return;
+        }
+
+        // 经过上面的判断，最后就可以判断该方法应该是普通方法了，即形式为 xxx(_,...)
+        sign->type = SIGN_METHOD;
+
+        // ( 后面为 )，说明没有参数，直接返回即可，不用走后面声明形参的逻辑
+        if (matchToken(cu->curLexer, TOKEN_RIGHT_PAREN)) {
+            return;
+        }
+    }
+
+    // 声明形参为局部变量
+    processParaList(cu, sign);
+
+    // 形参后面必须为 )
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after parameter list!");
+}
 
 // 为单运算符的符号方法生成方法签名
 static void unaryMethodSignature(CompileUnit *cu UNUSED, Signature *sign) {
-    // 单运算符的符号方法类型 Getter 方法，且没有方法参数
+    // 单运算符的符号方法类型 getter 方法，且没有方法参数
     sign->type = SIGN_GETTER;
 }
 
@@ -457,27 +544,26 @@ static void infixMethodSignature(CompileUnit *cu UNUSED, Signature *sign UNUSED)
     // 例如 2 + 3 相当于 2.+(3) ，其中 + 方法参数为 3，参数个数为 1
     sign->argNum = 1;
 
-    // 期待当前 token 类型为 TOKEN_LEFT_PAREN，并读入下个 token
+    // 方法名后面必须为 (
     assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "expect '(' after infix operator!");
 
-    // 期待当前 token 类型为 TOKEN_ID，并读入下个 token
+    // ( 后面必须为标识符
     assertCurToken(cu->curLexer, TOKEN_ID, "expect variable name!");
 
     // 声明中缀运算符的符号方法参数为变量
     // 此处之所以是 preToken，是因为上个 assertCurToken 方法已经读入了参数
     declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
 
-    // 期待当前 token 类型为 TOKEN_RIGHT_PAREN，并读入下个 token
+    // 参数后面必须为 )
     assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after paramter!");
 }
 
 // 为既可做单运算符也可做中缀运算符的符号方法生成方法签名
 static void mixMethodSignature(CompileUnit *cu UNUSED, Signature *sign UNUSED) {
-    // 先默认为单运算符
+    // 先默认为单运算符，即方法类型为 getter 方法，方法形式为 xxx
     sign->type = SIGN_GETTER;
 
-    // 如果 curToken 为 (，则为中缀运算符
-    // 注意此处 matchToken 方法中如果满足条件，会读入下一个 token
+    // 方法名后面为 ( 则说明是普通方法，方法形式为 xxx(_,...)，进而可以判断为中缀运算符
     if (matchToken(cu->curLexer, TOKEN_LEFT_PAREN)) {
         // 中缀运算符的符号方法类型普通方法
         sign->type = SIGN_METHOD;
@@ -486,14 +572,14 @@ static void mixMethodSignature(CompileUnit *cu UNUSED, Signature *sign UNUSED) {
         // 例如 2 + 3 相当于 2.+(3) ，其中 + 方法参数为 3，参数个数为 1
         sign->argNum = 1;
 
-        // 期待当前 token 类型为 TOKEN_ID，并读入下个 token
+        // ( 后面必须为标识符
         assertCurToken(cu->curLexer, TOKEN_ID, "expect variable name!");
 
         // 声明中缀运算符的符号方法参数为变量
         // 此处之所以是 preToken，是因为上个 assertCurToken 方法已经读入了参数
         declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
 
-        // 期待当前 token 类型为 TOKEN_RIGHT_PAREN，并读入下个 token
+        // 参数后面必须为 )
         assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after paramter!");
     }
 }
