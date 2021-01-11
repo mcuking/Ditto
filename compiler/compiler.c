@@ -599,7 +599,16 @@ static void emitLoadOrStoreVariable(CompileUnit *cu, Variable var, bool canAssig
     }
 }
 
-//下面调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
+// 生成将实例对象 this 压入到运行时栈顶的指令
+static void emitLoadThis(CompileUnit *cu) {
+    Variable var = getVarFromLocalOrUpvalue(cu, "this", 4);
+    // 如果找不到，即 var 的 scopeType 属性为 VAR_SCOPE_INVALID，则报错
+    ASSERT(var.scopeType != VAR_SCOPE_INVALID, "get this variable failed!");
+    // 否则生成指令
+    emitLoadVariable(cu, var);
+}
+
+// 调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
 // 例如 test(a)，preToken 为 test，curToken 为 (
 // 在调用方 compileMethod 中，方法名已经获取了，同时方法签名已经创建了，只需要下面的函数获取符号方法的类型、方法参数个数，来完善方法签名
 
