@@ -453,6 +453,98 @@ static int findLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
     return -1;
 }
 
+// 添加自由变量 upvalue
+// 添加 upvalue 到 cu->upvalues，并返回其索引值，若以存在则只返回索引即可
+// isEnclosingLocalVar 表示 upvalue 是否是直接外层编译单元中的局部变量
+// 如果是，则 index 表示的是此 upvalue 在直接外层编译单元的局部变量的索引
+// 如果不是，则 index 表示的是此 upvalue 在直接外层编译单元的 upvalue 的索引
+// 也就是说内层函数可能引用的不是直接外层函数的局部变量，而是更外层函数的局部变量
+// 注：upvalue 是针对引用外层函数局部变量的内层函数的
+static int addUpvalue(CompileUnit *cu, bool isEnclosingLocalVar, uint32_t index) {
+    uint32_t idx = 0;
+    while (idx < cu->fn->upvalueNum) {
+        // 如果该 upvalue 已经添加过，则直接返回其索引值
+        if (cu->upvalues[idx].index == index && cu->upvalues[idx].isEnclosingLocalVar == isEnclosingLocalVar) {
+            return idx;
+        }
+        idx--;
+    }
+
+    // 否则直接添加并返回索引
+    cu->upvalues[cu->fn->upvalueNum].index = index;
+    cu->upvalues[cu->fn->upvalueNum].isEnclosingLocalVar = isEnclosingLocalVar;
+    return cu->fn->upvalueNum++;
+}
+
+// 查找自由变量
+// 供内层函数向上查找被自己引用的与 name 变量同名的自由变量 upvalue，在哪个外层函数或模块中
+static int findUpvalue(CompileUnit *cu, const char *name, uint32_t length) {
+    // 已经到了模块对应的编译单元，即已经到了最外层了，仍找不到故返回 -1
+    if (cu->enclosingUnit == NULL) {
+        return -1;
+    }
+
+    // 前置知识：
+
+    // 目前模块、类的方法、函数会有对应的编译单元，类本身没有
+    // 在编译某个模块中的类的方法时，为了快捷地找到该方法所属的类的，
+    // 会将该类的 ClassBookKeep 结构赋值给该模块对应的编译单元的 cu->enclosingClassBK
+    // 所以 cu->enclosingUnit->enclosingClassBK != NULL （cu->enclosingUnit 为 cu 的直接外层编译单元）
+    // 说明 cu 是类的方法的编译单元，cu->enclosingUnit 为该类所在模块的编译单元（类没有编译单元）
+
+    // 另外类的静态属性，会被定义为类所在模块的局部变量，且为了区分模块中可能存在多个类有同名的属性，所以局部变量的格式为 'Class类名 静态属性名'
+    // 所以 strchr(name, ' ') 为 NULL，说明查找的自由变量 upvalue 名没有空格，也就不是类的静态属性，也就不是模块的局部变量（模块中无法直接定义局部变量）
+    // 所以没有必要再从模块的局部变量中查找了，直接返回 -1 即可
+    if (cu->enclosingUnit->enclosingClassBK != NULL && !strchr(name, ' ')) {
+        return -1;
+    }
+
+    // 从直接外层编译单元中查找自由变量 upvalue
+    int directOuterLocalIndex = findLocalVar(cu->enclosingUnit, name, length);
+    // 如果找到，则将 localVars 数组中对应变量的 isUpvalue 属性设置成 true，并将该变量添加到 cu->upvalues 数组中
+    if (directOuterLocalIndex != -1) {
+        cu->localVars[directOuterLocalIndex].isUpvalue = true;
+        // 由于是从直接外层编译单元的局部变量中找到，所以 isEnclosingLocalVar 为 true
+        // 且 directOuterLocalIndex 为在直接外层编译单元的局部变量的索引
+        return addUpvalue(cu, true, (uint32_t)directOuterLocalIndex);
+    }
+
+    // 否则递归调用 findUpvalue 函数继续向上层查找自由变量 upvalue
+    // 递归过程会将 upvalue 添加到编译单元链上的所有中间层编译单元的 upvalue 数组 upvalues 中
+    int directOuterUpvalueIndex = findUpvalue(cu->enclosingUnit, name, length);
+    // 如果找到，则将变量添加到 cu->upvalues 数组中
+    if (directOuterUpvalueIndex != -1) {
+        // 由于是从非直接外层编译单元的局部变量中找到，所以 isEnclosingLocalVar 为 false
+        // 且 directOuterUpvalueIndex 为直接外层编译单元的 upvalue 的索引
+        return addUpvalue(cu, false, (uint32_t)directOuterUpvalueIndex);
+    }
+
+    // 没有找到名为 name 的 upvalue，则返回 -1
+    return -1;
+}
+
+// 供内层函数在局部变量和自由变量 upvalue 中查找符号 name
+// 先从内层函数中的局部变量查找，找到则更正变量类型为局部变量类型，并返回
+// 否则即为自由变量 upvalue，需要调用 findUpvalue 函数向上层编译单元中查找，如果找到则更正变量类型为 upvalue 变量类型，并返回
+static Variable getVarFromLocalOrUpvalue(CompileUnit *cu, const char *name, uint32_t length) {
+    Variable var;
+    // 变量类型默认为无效作用域类型，查找到后会被更正
+    var.scopeType = VAR_SCOPE_INVALID;
+
+    var.index = findLocalVar(cu, name, length);
+
+    if (var.index != -1) {
+        var.scopeType = VAR_SCOPE_LOCAL;
+        return var;
+    }
+
+    var.index = findUpvalue(cu, name, length);
+    if (var.index != -1) {
+        var.scopeType = VAR_SCOPE_UPVALUE;
+    }
+    return var;
+}
+
 //下面调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
 // 例如 test(a)，preToken 为 test，curToken 为 (
 // 在调用方 compileMethod 中，方法名已经获取了，同时方法签名已经创建了，只需要下面的函数获取符号方法的类型、方法参数个数，来完善方法签名

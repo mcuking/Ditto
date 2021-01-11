@@ -23,8 +23,8 @@
 // 定义 Upvalue 的结构
 typedef struct
 {
-    bool isEnclosingLcalVar; // 是否是直接外层函数的局部变量
-    uint32_t index;          // 如果 isEnclosingLcalVar 为 true，则 index 表示外层函数中局部变量的索引，否则是外层函数中 upvalue 中的索引
+    bool isEnclosingLocalVar; // 是否是直接外层函数的局部变量
+    uint32_t index;           // 如果 isEnclosingLocalVar 为 true，则 index 表示外层函数中局部变量的索引，否则是外层函数中 upvalue 中的索引
 } Upvalue;
 
 // 定义局部变量的结构
