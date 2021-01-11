@@ -545,6 +545,60 @@ static Variable getVarFromLocalOrUpvalue(CompileUnit *cu, const char *name, uint
     return var;
 }
 
+// 生成【将索引为 index 的变量的值压入栈顶】的指令
+static void emitLoadVariable(CompileUnit *cu, Variable var) {
+    switch (var.scopeType) {
+        case VAR_SCOPE_LOCAL:
+            // 生成【将局部变量的值压入栈顶】的指令
+            writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, var.index);
+            break;
+        case VAR_SCOPE_UPVALUE:
+            // 生成【将自由变量的值压入栈顶】的指令
+            writeOpCodeByteOperand(cu, OPCODE_LOAD_UPVALUE, var.index);
+            break;
+        case VAR_SCOPE_MODULE:
+            // 生成【将模块变量的值压入栈顶】的指令
+            writeOpCodeByteOperand(cu, OPCODE_LOAD_MODULE_VAR, var.index);
+            break;
+        default:
+            NOT_REACHED();
+    }
+}
+
+// 生成【将栈顶数据存入索引为 index 的变量】的指令
+static void emitStoreVariable(CompileUnit *cu, Variable var) {
+    switch (var.scopeType) {
+        case VAR_SCOPE_LOCAL:
+            // 生成【将栈顶数据存入局部变量】的指令
+            writeOpCodeByteOperand(cu, OPCODE_STORE_LOCAL_VAR, var.index);
+            break;
+        case VAR_SCOPE_UPVALUE:
+            // 生成【将栈顶数据存入自由变量】的指令
+            writeOpCodeByteOperand(cu, OPCODE_STORE_UPVALUE, var.index);
+            break;
+        case VAR_SCOPE_MODULE:
+            // 生成【将栈顶数据存入模块变量】的指令
+            writeOpCodeByteOperand(cu, OPCODE_STORE_MODULE_VAR, var.index);
+            break;
+        default:
+            NOT_REACHED();
+    }
+}
+
+// 生成 压入变量值到栈顶 或者 保存栈顶数据到变量 的方法
+static void emitLoadOrStoreVariable(CompileUnit *cu, Variable var, bool canAssign) {
+    // canAssign 为 true 表示具备可赋值的环境，且当前 token 为等号 =，则可判断等号右边就是需要赋值的表达式
+    // 先调用 expression 方法生成计算等号右边的表达式值的指令（这些指令执行完后，运行时栈顶的值就是计算结果）
+    // 然后将栈顶的值，即表达式计算结果，保存到变量中，即调用 emitStoreVariable 方法
+    if (canAssign && matchToken(cu->curLexer, TOKEN_ASSIGN)) {
+        expression(cu, BP_LOWEST);
+        emitStoreVariable(cu, var);
+    } else {
+        // 否则生成 加载变量值到栈顶 的指令
+        emitLoadVariable(cu, var);
+    }
+}
+
 //下面调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
 // 例如 test(a)，preToken 为 test，curToken 为 (
 // 在调用方 compileMethod 中，方法名已经获取了，同时方法签名已经创建了，只需要下面的函数获取符号方法的类型、方法参数个数，来完善方法签名
