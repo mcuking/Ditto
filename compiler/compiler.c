@@ -608,6 +608,44 @@ static void emitLoadThis(CompileUnit *cu) {
     emitLoadVariable(cu, var);
 }
 
+// 编译代码块
+// 代码块是包括在 {} 中间的代码，例如函数体、方法体、方法的块参数
+// 一个代码块就被视为一个独立的指令流，也就是编译单元
+// 遇到 { 就调用该函数，函数中调用 compileProgram 编译，直到遇到 }
+static void compileBlock(CompileUnit *cu) {
+    // 调用该函数时，已经读入了 {
+    while (!matchToken(cu->curLexer, TOKEN_RIGHT_BRACE)) {
+        // 如果在 } 之前遇到了 标识文件结束的 token 类型 TOKEN_EOF，则报错
+        if (cu->curLexer->curToken.type == TOKEN_EOF) {
+            COMPILE_ERROR(cu->curLexer, "expect '}' at the end of block!");
+        }
+        compileProgram(cu);
+    }
+}
+
+// 编译函数体/方法体
+static void compileBody(CompileUnit *cu, bool isConstruct) {
+    // 进入函数前已经读入了 {
+    compileBlock(cu);
+
+    // 当函数执行完后，会生成【将栈顶值（即函数运行的结果）返回，并将该函数对应运行时栈的部分销毁】的指令
+    // 所以函数执行完成后，需要将函数运行结果压入到栈顶
+    if (isConstruct) {
+        // 如果是构造函数，则默认返回的函数运行结果是实例对象，即 this 的指向，
+        // 而对于构造函数，默认设定 this 为第 0 个局部变量，所以只需要将该函数的第一个局部变量的值压入栈中即可
+        // 注意这里的第 0 个局部变量不是指 cu->localVars 数组中的值，该数组只是保存局部变量的名字，例如第 0 个元素为 'this'
+        // 函数的局部变量的值是存储在运行时栈中的，所以需要从运行时栈中获取第 0 个局部变量 this 的值，然后将其压入栈顶
+        writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, 0);
+    } else {
+        // 如果是普通函数，则默认返回的函数运行结果是 NULL
+        // 所以将 NULL 压入栈顶即可
+        writeOpCode(cu, OPCODE_PUSH_NULL);
+    }
+
+    // 当函数执行完后，会生成【将栈顶值（即函数运行的结果）返回，并将该函数对应运行时栈的部分销毁】的指令
+    writeOpCode(cu, OPCODE_RETURN);
+}
+
 // 调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
 // 例如 test(a)，preToken 为 test，curToken 为 (
 // 在调用方 compileMethod 中，方法名已经获取了，同时方法签名已经创建了，只需要下面的函数获取符号方法的类型、方法参数个数，来完善方法签名
