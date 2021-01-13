@@ -646,6 +646,47 @@ static void compileBody(CompileUnit *cu, bool isConstruct) {
     writeOpCode(cu, OPCODE_RETURN);
 }
 
+// 结束编译单元的编译工作，在直接外层编译单元中为其创建闭包
+// 编译单元本质就是指令流单元
+#if DEBUG
+static ObjFn *endCompileUnit(CompileUnit *cu, const char *debugName, uint32_t debugNameLen) {
+    // 如果处于调试阶段，会额外调用 bindDebugFnName 将函数名 debugName 写入到 cu->fn->debug 中
+    bindDebugFnName(cu->curLexer->vm, cu->fn->debug, debugName, debugNameLen);
+#else
+static ObjFn *endCompileUnit(CompileUnit *cu) {
+#endif
+
+    // 生成 标识编译单元编译结束 的指令
+    writeOpCode(cu, OPCODE_END);
+
+    if (cu->enclosingUnit != NULL) {
+        // 将当前编译单元的 cu->fn (其中就包括了该编译单元的指令流 cu->fn->instrStream)
+        // 添加到直接外层编译单元即父编译单元的常量表中
+        uint32_t index = addConstant(cu, OBJ_TO_VALUE(cu->fn));
+
+        // 在直接外层编译单元的 fn->instrStream 指令流中，添加 为当前内层函数创建闭包 的指令，其中 index 就是上面添加到常量表得到的索引值
+        // 也就是说，内层函数是以闭包形式在外层函数中存在
+        writeOpCodeShortOperand(cu->enclosingUnit, OPCODE_CREATE_CLOSURE, index);
+
+        // 上面向直接外层编译单元的指令流 cu->enclosingUnit->fn->instrStream 中写入为当前内层函数创建闭包的指令 OPCODE_CREATE_CLOSURE，
+        // 当虚拟机执行该命令时，已经在直接外层编译单元了，是没办法直到内层函数 upvalue 数组 cu->upvalues 中哪些是直接外层编译单元的局部变量，哪些是直接外层编译单元的 upvalue
+        // 只有知道，才能在运行时栈找到对应的值，所以需要将 是直接外层编译单元的局部变量还是 upvalue 信息记录下来
+        // 这里就直接写入了直接外层编译单元的指令流 cu->enclosingUnit->fn->instrStream 中
+        // 按照 {upvalue 是否是直接编译外层单元的局部变量，upvalue 在直接外层编译单元的索引} 成对信息写入的
+        // 以供虚拟机后面读入
+        index = 0;
+        while (index < cu->fn->upvalueNum) {
+            writeByte(cu->enclosingUnit, cu->upvalues[index].isEnclosingLocalVar ? 1 : 0);
+            writeByte(cu->enclosingUnit, cu->upvalues[index].index);
+            index++;
+        }
+    }
+
+    // 将当前编译单元设置成直接外层编译单元
+    cu->curLexer->curCompileUnit = cu->enclosingUnit;
+    return cu->fn;
+}
+
 // 调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
 // 例如 test(a)，preToken 为 test，curToken 为 (
 // 在调用方 compileMethod 中，方法名已经获取了，同时方法签名已经创建了，只需要下面的函数获取符号方法的类型、方法参数个数，来完善方法签名
