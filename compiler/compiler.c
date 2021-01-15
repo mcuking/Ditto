@@ -687,6 +687,124 @@ static ObjFn *endCompileUnit(CompileUnit *cu) {
     return cu->fn;
 }
 
+// 生成【调用 getter 方法或普通方法】的指令
+// 形参 sign 是待调用方法的签名，在调用本函数之前，已经处理了方法名，
+// 本函数主要是处理方法名后面的部分
+// 因此此时只知道方法名，并不知道方法类型等信息，所以形参 sign 是不完整的，需要在本函数进一步完善
+static void emitGetterMethodCall(CompileUnit *cu, Signature *sign, OpCode opCode) {
+    Signature newSign;
+    // 默认方法类型为 getter 类型
+    newSign.type = SIGN_GETTER;
+    newSign.name = sign->name;
+    newSign.length = sign->length;
+    newSign.argNum = 0;
+
+    // 如果是普通方法，可能会有参数列表，在调用该方法之前，必须先将参数压入运行时栈，否则运行方法时，
+    // 会获取到错误的参数（即栈中已有数据），还会在方法运行结束时，错误的回收对应的空间，导致栈失衡
+    // 因此如果后面有参数，则需要先生成【将实参压入到运行时栈】的指令
+
+    // 如果后面有 (，可能有参数列表
+    if (matchToken(cu->curLexer, TOKEN_LEFT_PAREN)) {
+        // 设置成普通函数类型
+        newSign.type = SIGN_METHOD;
+
+        // 如果后面不是 )，说明有参数列表
+        if (!matchToken(cu->curLexer, TOKEN_RIGHT_PAREN)) {
+            processArgList(cu, &newSign);
+            // 参数之后需为 )，否则报错
+            assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after argument list!");
+        }
+    }
+
+    // 如果后面有 {，可能有块参数，块参数就是传入的参数是一个代码块，也就是函数
+    // 注意此处是函数调用，而不是函数定义
+    // 块参数即函数的参数，是夹在 |形参列表| 之间的形参列表，可参考下面 ruby 的写法：
+    // class A {
+    //     new () {
+
+    //     }
+
+    //     bar(fn) {
+    //         fn.call(123)
+    //     }
+    // }
+    // var a = A.new()
+    // a.bar {|n| System.print(n)}
+    // 其中 n 就是块参数（即传入的函数）的参数
+    if (matchToken(cu->curLexer, TOKEN_LEFT_BRACKET)) {
+        // 参数加 1
+        newSign.argNum++;
+        // 设置成普通函数类型
+        newSign.type = SIGN_METHOD;
+
+        // 开始编译传入的函数
+        CompileUnit fnCU;
+        initCompileUnit(cu->curLexer, &fnCU, cu, false);
+        // 临时的函数签名，用于编译传入的函数
+        Signature tempFnSign = {SIGN_METHOD, "", 0, 0};
+        // 如果下一个字符为 |，说明该传入的函数也有参数
+        if (matchToken(cu->curLexer, TOKEN_BIT_OR)) {
+            processParaList(&fnCU, &tempFnSign);
+            // 参数之后需为 ｜，否则报错
+            assertCurToken(cu->curLexer, TOKEN_BIT_OR, "expect '｜' after argument list!");
+        }
+        fnCU.fn->argNum = tempFnSign.argNum;
+        // 开始编译传入的函数的函数体，将该指令写进该函数自己的指令流中
+        compileBody(&fnCU, false);
+#if DEBUG
+        // 以接受块参数（即传入函数）的方法来命名传入函数，传入函数名=方法名+" block arg"
+        // 其中加 10，是因为 " block arg" 有 10 个字符
+        char fnName[MAX_SIGN_LEN + 10] = {'\0'};
+        // 将接受块参数的方法的签名转化成字符串，并写入到 fnName 中，最后返回字符串的长度
+        uint32_t len = sign2String(&newSign, fnName);
+        // void *memmove(void *str1, const void *str2, size_t n) 从 str2 复制 n 个字符到 str1
+        // 在上一行生成的字符串结尾追加字符串 " block arg"
+        memmove(fnName + len, " block arg", 10);
+        endCompileUnit(&fnCU, fnName, len + 10);
+#else
+        // 结束编译传入的函数
+        endCompileUnit(&fnCU);
+#endif
+    }
+
+    // 如果是构造函数类型的方法，
+    if (sign->type == SIGN_CONSTRUCT) {
+        // 如果此处 newSign.type 不是 SIGN_METHOD，仍旧是 SIGN_GETTER
+        // 说明没有满足上面的两个条件判断，也就是方法名后面没有 ( 或 {
+        // 也就是直接按照 getter 类型方法的形式调用，即直接就是方法名
+        // 但是有根据 sign->type 判断该方法为构造函数，调用形式应类似 super() 或者 super(arguments)
+        // 所以调用形式有问题，直接报编译错误即可
+        if (newSign.type != SIGN_METHOD) {
+            COMPILE_ERROR(cu->curLexer, "the form of supercall is super() or super(arguments)");
+        }
+        newSign.type = SIGN_CONSTRUCT;
+    }
+
+    // 根据函数签名生成【调用函数】指令
+    emitCallBySignature(cu, &newSign, opCode);
+}
+
+// 生成【调用方法】的指令，包含所有方法
+static void emitMethodCall(CompileUnit *cu, const char *name, uint32_t length, OpCode opCode, bool canAssign) {
+    Signature sign;
+    sign.name = name;
+    sign.length = length;
+    sign.type = SIGN_GETTER;
+
+    // 如果后面是 = 且是可赋值环境，则判定该方法为 setter 类型方法
+    if (matchToken(cu->curLexer, TOKEN_ASSIGN) && canAssign) {
+        sign.type = SIGN_SETTER;
+        sign.argNum = 1;
+
+        // 加载实参（即等号 = 后面的表达式的计算结果），为下面方法调用传参
+        expression(cu, BP_LOWEST);
+
+        emitCallBySignature(cu, &sign, opCode);
+    } else {
+        emitGetterMethodCall(cu, &sign, opCode);
+    }
+}
+
 // 调用下面的生成方法签名的函数之时，preToken 为方法名，curToken 为方法名右边的符号
 // 例如 test(a)，preToken 为 test，curToken 为 (
 // 在调用方 compileMethod 中，方法名已经获取了，同时方法签名已经创建了，只需要下面的函数获取符号方法的类型、方法参数个数，来完善方法签名
@@ -1035,7 +1153,7 @@ static ClassBookKeep *getEnclosingClassBK(CompileUnit *cu) {
 }
 
 // 处理函数/方法实参
-// 基于实参列表生成加载实参到运行时栈中的指令
+// 基于实参列表生成【加载实参到运行时栈中】的指令
 // 虚拟机执行指令后，会从左到右依次将实参压入到运行时栈，被调用的函数/方法会从栈中获取参数
 // 注：expression 就是用来计算表达式，即会生成计算表达式的一系列指令，虚拟机在执行这些指令后，就会计算出表达式的结果
 static void processArgList(CompileUnit *cu, Signature *sign) {
