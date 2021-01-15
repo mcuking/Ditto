@@ -1195,6 +1195,33 @@ static void processParaList(CompileUnit *cu, Signature *sign) {
     } while (matchToken(cu->curLexer, TOKEN_COMMA));
 }
 
+// 判断是否是局部变量
+// 如果是具有全局变量性质的变量名建议使用大写字母开头，例如：类名、模块变量名
+// 如果是具有局部变量性质的变量名建议使用小写字母开头，例如：方法名、局部变量名
+// 当不遵守规范，全局变量也使用了小写字母开头，恰好和类中的 getter 方法名同名，则优先选择 getter 方法，示例如下：
+// class Foo {
+//     var name
+//     new(n) {
+//         name = n
+//     }
+//     myName {
+//         return name
+//     }
+//     hi() {
+//         System.print("hello, I am " + myName + "!")
+//     }
+// }
+
+// var f = Foo.new("da hong");
+// var myName = "xiao sa"
+// f.hi()
+// 其中，hi 方法会优先选择 getter 方法 myName 而非全局变量 myName
+// 注意：在同一个类中调用类中的其他方法，不需要显示地指明对象，即 “对象.方法名”，例如 this.myName  this.hi()
+// 而是直接写方法名即可，编译器会从当前对象所属类的方法中查找
+static bool isLocalName(const char *name) {
+    return (name[0] >= 'a' && name[0] <= 'z');
+}
+
 // 编译程序
 // TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
