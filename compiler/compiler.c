@@ -156,6 +156,19 @@ SymbolBindRule Rules[] = {
     /* TOKEN_STRING */ PREFIX_SYMBOL(literal),
     /* TOKEN_ID */ {NULL, BP_NONE, id, NULL, idMethodSignature},
     /* TOKEN_INTERPOLATION */ PREFIX_SYMBOL(stringInterpolation),
+    /* TOKEN_VAR */ UNUSED_RULE,
+    /* TOKEN_FUN */ UNUSED_RULE,
+    /* TOKEN_IF */ UNUSED_RULE,
+    /* TOKEN_ELSE */ UNUSED_RULE,
+    /* TOKEN_TRUE */ PREFIX_SYMBOL(boolean),
+    /* TOKEN_FALSE */ PREFIX_SYMBOL(boolean),
+    /* TOKEN_WHILE */ UNUSED_RULE,
+    /* TOKEN_FOR */ UNUSED_RULE,
+    /* TOKEN_BREAK */ UNUSED_RULE,
+    /* TOKEN_CONTINUE */ UNUSED_RULE,
+    /* TOKEN_RETURN */ UNUSED_RULE,
+    /* TOKEN_NULL */ PREFIX_SYMBOL(null),
+    /* TOKEN_CLASS */ UNUSED_RULE,
 };
 
 // 初始化编译单元 CompileUnit
@@ -1440,6 +1453,20 @@ static void stringInterpolation(CompileUnit *cu, bool canAssign UNUSED) {
 
     // 调用 list 实例的 join 方法，将 list 中保存的字符合成一个字符串
     emitCall(cu, "join()", 6, 0);
+}
+
+// 编译 bool，即 bool 的 nud 方法
+static void boolean(CompileUnit *cu, bool canAssign UNUSED) {
+    // 如果是 true，则生成【压入 true 到运行时栈顶】的指令，否则生成【压入 false 到运行时栈顶】的指令
+    OpCode opCode = cu->curLexer->preToken.type == TOKEN_TRUE ? OPCODE_PUSH_TRUE : OPCODE_PUSH_FALSE;
+    // 上面的指令只有操作码，没有操作数
+    writeOpCode(cu, opCode);
+}
+
+// 编译 null，即 null 的 nud 方法
+static void null(CompileUnit *cu, bool canAssign UNUSED) {
+    // 生成【压入 null 到运行时栈顶】的指令
+    writeOpCode(cu, OPCODE_PUSH_NULL);
 }
 
 // 编译程序
