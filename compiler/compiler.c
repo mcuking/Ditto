@@ -155,6 +155,7 @@ SymbolBindRule Rules[] = {
     /* TOKRN_NUM */ PREFIX_SYMBOL(literal),
     /* TOKEN_STRING */ PREFIX_SYMBOL(literal),
     /* TOKEN_ID */ {NULL, BP_NONE, id, NULL, idMethodSignature},
+    /* TOKEN_INTERPOLATION */ PREFIX_SYMBOL(stringInterpolation),
 };
 
 // 初始化编译单元 CompileUnit
@@ -269,15 +270,15 @@ static uint32_t addConstant(CompileUnit *cu, Value constant) {
     return cu->fn->constants.count - 1;
 }
 
-// 生成【加载常量】的指令
+// 生成【加载常量到常量表，并将常量压入到运行时栈顶】的指令
 static void emitLoadConstant(CompileUnit *cu, Value constant) {
     // 1. 将常量通过 addConstant 加载到常量表，并获取其在常量表中的索引 index
     int index = addConstant(cu, constant);
-    // 2. 生成【操作符为 OPCODE_LOAD_CONSTANT，操作数为 index】的指令
+    // 2. 生成【将常量压入到运行时栈顶】的指令
     writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, index);
 }
 
-// 字面量（即常量，包括数字、字符串）的 nud 方法
+// 编译字面量（即常量，包括数字、字符串），即字面量的 nud 方法
 // 即在语法分析时，遇到常量时，就调用该 nud 方法直接生成将该常量添加到运行时栈的指令即可
 static void literal(CompileUnit *cu, bool canAssign UNUSED) {
     // 是 preToken 的原因：
@@ -1223,7 +1224,8 @@ static bool isLocalName(const char *name) {
     return (name[0] >= 'a' && name[0] <= 'z');
 }
 
-// 编译标识符的引用，该方法是标识符的 nud 方法，即调用该方式，preToken 为该标识符，curToken 为标识符右边的符号，这里是处理标识符的引用而非定义
+// 编译标识符的引用，即标识符的 nud 方法，
+// 调用该函数时preToken 为该标识符，curToken 为标识符右边的符号
 // 标识符可以是函数名、变量名、类静态属性、对象实例属性等
 // 当同名时优先级：函数调用 > 局部变量和 upvalue > 对象实例属性 > 类静态属性 > 类的 getter 方法调用 > 模块变量
 static void id(CompileUnit *cu, bool canAssign) {
@@ -1389,6 +1391,55 @@ static void id(CompileUnit *cu, bool canAssign) {
         // 如果找到模块变量，则生成【压入变量值到栈顶】或者【保存栈顶数据到变量】的方法
         emitLoadOrStoreVariable(cu, var, canAssign);
     }
+}
+
+// 生成【将模块变量压入到运行时栈顶】的指令，类是以模块变量的形式存储的，所以用此函数加载类
+static void emitLoadModuleVar(CompileUnit *cu, const char *name) {
+    // 先从当前模块的模块变量名字表 moduleVarName 中查找是否存在
+    int index = getIndexFromSymbolTable(&cu->curLexer->curModule->moduleVarName, name, strlen(name));
+    // 如果没有，则报错提示应该先定义该模块变量
+    ASSERT(index != -1, "symbol should have been defined");
+    // 如果找到，则生成【将模块变量压入到运行时栈顶】的指令
+    writeOpCodeShortOperand(cu, OPCODE_LOAD_MODULE_VAR, index);
+}
+
+// 编译内嵌表达式，即内嵌表达式的 nud 方法
+// 内嵌表达式即字符串内可以使用变量，类似 JavaScript 中的字符串模板
+// 例如本书规定写法形式是 %(变量名)
+// 例如 a %(b+c) d %(e) f 会被编译成 ["a", b+c, " d", e, "f "].join()，
+// 其中 a 和 d 是 TOKEN_INTERPOLATION，b/c/e 是 TOKEN_ID，f 是 TOKEN_STRING
+static void stringInterpolation(CompileUnit *cu, bool canAssign UNUSED) {
+    // 创造一个 list 实例，用来保存下面拆分字符串得到的各个部分
+    // 加载 List 模块变量
+    emitLoadModuleVar(cu, "List");
+    // 调用 List 的 new 方法，创造一个 list 实例
+    emitCall(cu, "new()", 5, 0);
+
+    // 每次循环处理字符串中的一个内嵌表达式
+    // 例如 a %(b+c) d %(e) f，先将类型为 TOKEN_INTERPOLATION 的字符 a 添加到 list，再将内嵌表达式 b+c 添加到 list，这是一次循环
+    // 下一次循环再处理 d %(e)
+    do {
+        // 1. 先编译字符串中的类型为 TOKEN_INTERPOLATION 的字符，即生成【加载常量（即该字符）到常量表，并将常量压入到运行时栈顶】的指令
+        literal(cu, false);
+        // 调用 list 实例对象的 addCore 方法，将运行时栈顶的字符添加到 list 实例中
+        emitCall(cu, "addCore_(_)", 11, 1);
+
+        // 2. 然后编译内嵌表达式，即生成【计算表达式，并将结果压入到运行时栈顶】的指令
+        expression(cu, BP_LOWEST);
+        // 调用 list 实例对象的 addCore 方法，将上面的表达式结果从运行时栈顶保存到 list 实例中
+        emitCall(cu, "addCore_(_)", 11, 1);
+    } while (matchToken(cu->curLexer, TOKEN_INTERPOLATION));
+
+    // 读取最后的字符串，例如 a %(b+c) d %(e) f 中的 f
+    // 如果结尾没有字符串，则报错
+    assertCurToken(cu->curLexer, TOKEN_STRING, "expect string at teh end of interpolation!");
+    // 编译最后的字符串，即生成【加载常量（即该字符）到常量表，并将常量压入到运行时栈顶】的指令
+    literal(cu, false);
+    // 调用 list 实例对象的 addCore 方法，将最后的字符串从运行时栈顶保存到 list 实例中
+    emitCall(cu, "addCore_", 11, 1);
+
+    // 调用 list 实例的 join 方法，将 list 中保存的字符合成一个字符串
+    emitCall(cu, "join()", 6, 0);
 }
 
 // 编译程序
