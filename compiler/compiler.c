@@ -151,9 +151,10 @@ typedef struct
 // 按照 lexer.h 中定义的枚举 TokenType 中各种类型的 token 顺序，来添加对应的符号绑定规则
 // 之所以要按照顺序填写，是为了方便用枚举值从 Rules 数组中找到某个类型的 token 的对应的符号绑定规则
 SymbolBindRule Rules[] = {
-    UNUSED_RULE,            // TOKEN_INVALID
-    PREFIX_SYMBOL(literal), // TOKRN_NUM
-    PREFIX_SYMBOL(literal), // TOKEN_STRING
+    /* TOKEN_INVALID */ UNUSED_RULE,
+    /* TOKRN_NUM */ PREFIX_SYMBOL(literal),
+    /* TOKEN_STRING */ PREFIX_SYMBOL(literal),
+    /* TOKEN_ID */ {NULL, BP_NONE, id, NULL, idMethodSignature},
 };
 
 // 初始化编译单元 CompileUnit
@@ -268,11 +269,11 @@ static uint32_t addConstant(CompileUnit *cu, Value constant) {
     return cu->fn->constants.count - 1;
 }
 
-// 生成加载常量的指令
+// 生成【加载常量】的指令
 static void emitLoadConstant(CompileUnit *cu, Value constant) {
     // 1. 将常量通过 addConstant 加载到常量表，并获取其在常量表中的索引 index
     int index = addConstant(cu, constant);
-    // 2. 生成操作符为 OPCODE_LOAD_CONSTANT，操作数为 index 的指令
+    // 2. 生成【操作符为 OPCODE_LOAD_CONSTANT，操作数为 index】的指令
     writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, index);
 }
 
@@ -585,7 +586,7 @@ static void emitStoreVariable(CompileUnit *cu, Variable var) {
     }
 }
 
-// 生成 压入变量值到栈顶 或者 保存栈顶数据到变量 的方法
+// 生成【压入变量值到栈顶】或者【保存栈顶数据到变量】的指令
 static void emitLoadOrStoreVariable(CompileUnit *cu, Variable var, bool canAssign) {
     // canAssign 为 true 表示具备可赋值的环境，且当前 token 为等号 =，则可判断等号右边就是需要赋值的表达式
     // 先调用 expression 方法生成计算等号右边的表达式值的指令（这些指令执行完后，运行时栈顶的值就是计算结果）
@@ -594,12 +595,12 @@ static void emitLoadOrStoreVariable(CompileUnit *cu, Variable var, bool canAssig
         expression(cu, BP_LOWEST);
         emitStoreVariable(cu, var);
     } else {
-        // 否则生成 加载变量值到栈顶 的指令
+        // 否则生成【加载变量值到栈顶】的指令
         emitLoadVariable(cu, var);
     }
 }
 
-// 生成将实例对象 this 压入到运行时栈顶的指令
+// 生成【将实例对象 this 压入到运行时栈顶】的指令
 static void emitLoadThis(CompileUnit *cu) {
     Variable var = getVarFromLocalOrUpvalue(cu, "this", 4);
     // 如果找不到，即 var 的 scopeType 属性为 VAR_SCOPE_INVALID，则报错
@@ -656,7 +657,7 @@ static ObjFn *endCompileUnit(CompileUnit *cu, const char *debugName, uint32_t de
 static ObjFn *endCompileUnit(CompileUnit *cu) {
 #endif
 
-    // 生成 标识编译单元编译结束 的指令
+    // 生成【标识编译单元编译结束】的指令
     writeOpCode(cu, OPCODE_END);
 
     if (cu->enclosingUnit != NULL) {
@@ -1220,6 +1221,174 @@ static void processParaList(CompileUnit *cu, Signature *sign) {
 // 而是直接写方法名即可，编译器会从当前对象所属类的方法中查找
 static bool isLocalName(const char *name) {
     return (name[0] >= 'a' && name[0] <= 'z');
+}
+
+// 编译标识符的引用，该方法是标识符的 nud 方法，即调用该方式，preToken 为该标识符，curToken 为标识符右边的符号，这里是处理标识符的引用而非定义
+// 标识符可以是函数名、变量名、类静态属性、对象实例属性等
+// 当同名时优先级：函数调用 > 局部变量和 upvalue > 对象实例属性 > 类静态属性 > 类的 getter 方法调用 > 模块变量
+static void id(CompileUnit *cu, bool canAssign) {
+    // 备份变量名
+    Token name = cu->curLexer->preToken;
+    ClassBookKeep *classBK = getEnclosingClassBK(cu);
+
+    // 标识符可以是任意字符，按照此顺序处理：
+    // 函数调用 > 局部变量和 upvalue > 对象实例属性 > 类静态属性 > 类的 getter 方法调用 > 模块变量
+
+    // 1. 按照【函数调用】处理
+    // cu->enclosingUnit == NULL 说明是在类外，且下一个字符是 (，故可以判断是函数调用
+    if (cu->enclosingUnit == NULL && matchToken(cu->curLexer, TOKEN_LEFT_PAREN)) {
+        // 在编译函数定义时，是按照 “Fn 函数名” 的形式作为模块变量存储起来，目的是和用户定义的局部变量做区分
+        // 所以在查找函数名之前，需要在前面添加 “Fn ” 前缀
+        char id[MAX_ID_LEN] = {'\0'};
+        memmove(id, "Fn ", 3);
+        memmove(id + 3, name.start, name.length);
+
+        Variable var;
+        var.scopeType = VAR_SCOPE_MODULE;
+        // 从当前模块的模块变量名字表 moduleVarName 中查找
+        var.index = getIndexFromSymbolTable(&cu->curLexer->curModule->moduleVarName, id, strlen(id));
+        // 如果没有找到对应的 “Fn 函数名”，则报编译错误，提示该函数没有定义
+        if (var.index == -1) {
+            memmove(id, name.start, name.length);
+            id[name.length] = '\0';
+            COMPILE_ERROR(cu->curLexer, "Undefined function: '%s'", id);
+        }
+
+        // 如果找到的模块变量，即函数闭包，则生成【将函数闭包压入到运行时栈顶】的指令
+        emitLoadVariable(cu, var);
+
+        // 创建函数签名，方便后面生成调用函数的指令
+        Signature sign;
+        // 函数调用是以 “函数闭包.call” 的形式，也就是说 call 是待调用的方法名
+        sign.name = "call";
+        sign.length = 4;
+        sign.argNum = 0;
+        // 函数调用的形式和 method 类型方法类似
+        sign.type = SIGN_METHOD;
+
+        // 如果 ( 后面不是 )，则说明有参数列表，调用 processArgList 将参数压入运行时栈
+        if (!matchToken(cu->curLexer, TOKEN_RIGHT_PAREN)) {
+            processArgList(cu, &sign);
+            assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after argument list!");
+        }
+
+        // 生成【调用函数】的指令
+        emitCallBySignature(cu, &sign, OPCODE_CALL0);
+    } else {
+        // 2. 按照【局部变量和 upvalue】处理
+        Variable var = getVarFromLocalOrUpvalue(cu, name.start, name.length);
+        if (var.index != -1) {
+            // 如果找到，则生成【压入变量值到栈顶】或者【保存栈顶数据到变量】的方法
+            emitLoadOrStoreVariable(cu, var, canAssign);
+            return;
+        }
+
+        // 3. 按照【对象实例的属性】处理
+        // classBK != NULL 说明模块中包含类
+        // 对象实例的属性在类中的定义形式是 “var 对象实例属性”
+        if (classBK != NULL) {
+            // 从类的符号属性表中查找
+            int fieldIndex = getIndexFromSymbolTable(&classBK->fields, name.start, name.length);
+            // 如果找到
+            if (fieldIndex != -1) {
+                // 编辑是使用对象实例属性，还是给对象实例属性赋值
+                bool isRead = true;
+                // 如果是可赋值环境，且对象实例的属性后面的字符是等号，则说明是给对象实例属性进行赋值
+                // 所以调用 expression 解析等号后面的表达式，生成【计算表达式】的指令，虚拟机执行指令后，该表达式的计算结果就保存在了运行时栈顶，方便下面使用
+                if (canAssign && matchToken(cu->curLexer, TOKEN_ASSIGN)) {
+                    isRead = false;
+                    expression(cu, BP_LOWEST);
+                }
+
+                // 如果当前则会跟你在编译类的方法，则按照在类的方法引用当前对象的属性处理
+                if (cu->enclosingUnit != NULL) {
+                    // 如果是使用属性，则生成【压入变量值到栈顶】指令；如果是赋值给属性，则生成【保存栈顶数据到变量】指令
+                    writeOpCodeByteOperand(cu, isRead ? OPCODE_LOAD_THIS_FIELD : OPCODE_STORE_THIS_FIELD, fieldIndex);
+                } else {
+                    // 否则按照在类外引用对象实例属性处理
+                    // 先生成【将实例对象 this 压入到运行时栈顶】的指令
+                    emitLoadThis(cu);
+                    // 如果是使用属性，则生成【压入变量值到栈顶】指令；如果是赋值给属性，则生成【保存栈顶数据到变量】指令
+                    writeOpCodeByteOperand(cu, isRead ? OPCODE_LOAD_FIELD : OPCODE_STORE_FIELD, fieldIndex);
+                }
+                return;
+            }
+        }
+
+        // 4. 按照【类的静态属性】处理
+        // classBK != NULL 说明模块中包含类
+        // 类的静态属性在类中的定义形式是 “static var 静态属性”
+        // 编译类的静态属性定义时，是按照 “Cls类名 静态属性名” 的形式作为模块变量存储的（因为类的静态属性是被所有对象共享的数据，因此需要长期有效，所以保存在模块变量中）
+        if (classBK != NULL) {
+            char *staticFieldId = ALLOCATE_ARRAY(cu->curLexer->vm, char, MAX_ID_LEN);
+            // void *memset(void *str, int c, size_t n) 复制字符 c（一个无符号字符）到参数 str 所指向的字符串的前 n 个字符
+            // 将 staticFieldId 中的每个字符都设置成 0
+            memset(staticFieldId, 0, MAX_ID_LEN);
+
+            // 根据 “Cls类名 静态属性名” 的存储形式，拼接需要查询的字符串
+            // 首先写入 Cls
+            memmove(staticFieldId, "Cls", 3);
+            // 再写入类名
+            char *clsName = classBK->name->value.start;
+            uint32_t clsLen = classBK->name->value.length;
+            memmove(staticFieldId + 3, clsName, clsLen);
+            // 再写入空格
+            memmove(staticFieldId + 3 + clsLen, ' ', 1);
+            // 再写入静态属性名
+            memmove(staticFieldId + 3 + clsLen + 1, name.start, name.length);
+
+            // TODO: 此处对书中代码存疑，类的静态属性是保存在模块变量中，所以应该是从当前模块的模块变量名字表 moduleVarName 中查找，
+            // 但是书中此处代码是调用 getVarFromLocalOrUpvalue 方法，在局部变量和自由变量 upvalue 中查找，需要后续确认
+            var = getVarFromLocalOrUpvalue(cu, staticFieldId, strlen(staticFieldId));
+            // 释放上面申请的内存
+            DEALLOCATE_ARRAY(cu->curLexer->vm, staticFieldId, MAX_ID_LEN);
+
+            if (var.index != -1) {
+                // 如果找到，则生成【压入变量值到栈顶】或者【保存栈顶数据到变量】的方法
+                emitLoadOrStoreVariable(cu, var, canAssign);
+                return;
+            }
+        }
+
+        // 5. 按照【类的 getter 方法调用】处理
+        // classBK != NULL 说明模块中包含类，方法名规定以小写字符开头
+        // 如果模块不按照规定，擅自以小写字符开头，则按照方法名查找，没有就报错
+        if (classBK != NULL && isLocalName(name.start)) {
+            // 生成【将实例对象 this 压入到运行时栈顶】的指令
+            // 一是为了将 this 放到 args[0]
+            // 二是为了确认对象所在的类，然后从类中获得所调用的方法
+            emitLoadThis(cu);
+            // 生成【调用方法】的指令
+            // 此时类可能还未编译完，未统计完所有方法，故此时无法判断类的方法是否定义，留待运行时检测
+            emitMethodCall(cu, name.start, name.length, OPCODE_CALL0, canAssign);
+            return;
+        }
+
+        // 6. 按照【模块变量】处理
+        var.scopeType = VAR_SCOPE_MODULE;
+        // 从当前模块的模块变量名字表 moduleVarName 中查找
+        var.index = getIndexFromSymbolTable(&cu->curLexer->curModule->moduleVarName, name.start, name.length);
+        // 如果在 curModule->moduleVarName 没找到
+        if (var.index == -1) {
+            // 标识符有可能还是函数名，原因如下：
+            // 最开始是按照函数调用形式来查找（判断条件中有判断后面的字符是否是 ‘(’）
+            // 有些情况，函数是作为参数形式出现的，比如函数名作为创建线程的参数，例如 thread.new(函数名)
+            // 所以重新以 “Fn 函数名” 的形式在当前模块的模块变量名字表 moduleVarName 中查找
+            char fnName[MAX_ID_LEN] = {'\0'};
+            memmove(fnName, "Fn ", 3);
+            memmove(fnName + 3, name.start, name.length);
+            var.index = getIndexFromSymbolTable(&cu->curLexer->curModule->moduleVarName, fnName, strlen(fnName));
+
+            // 如果不是函数名，则有可能该模块变量的定义在引用处的后面（这种情况是被允许的）
+            // 先暂时以当前行号作为变量名，以 null 作为变量值，来声明模块变量
+            // 等到编译结束后，在检查该模块变量是否有定义，若没有就正好用行号报错
+            if (var.index == -1) {
+                var.index = declareModuleVar(cu->curLexer->vm, cu->curLexer->curModule, name.start, name.length, NUM_TO_VALUE(cu->curLexer->curToken.lineNo));
+            }
+        }
+        // 如果找到模块变量，则生成【压入变量值到栈顶】或者【保存栈顶数据到变量】的方法
+        emitLoadOrStoreVariable(cu, var, canAssign);
+    }
 }
 
 // 编译程序
