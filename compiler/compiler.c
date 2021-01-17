@@ -169,6 +169,10 @@ SymbolBindRule Rules[] = {
     /* TOKEN_RETURN */ UNUSED_RULE,
     /* TOKEN_NULL */ PREFIX_SYMBOL(null),
     /* TOKEN_CLASS */ UNUSED_RULE,
+    /* TOKEN_THIS */ PREFIX_SYMBOL(this),
+    /* TOKEN_STATIC */ UNUSED_RULE,
+    /* TOKEN_IS */ INEFIX_OPERATOR('is', BP_IS),
+    /* TOKEN_SUPER */ PREFIX_SYMBOL(super),
 };
 
 // 初始化编译单元 CompileUnit
@@ -1467,6 +1471,41 @@ static void boolean(CompileUnit *cu, bool canAssign UNUSED) {
 static void null(CompileUnit *cu, bool canAssign UNUSED) {
     // 生成【压入 null 到运行时栈顶】的指令
     writeOpCode(cu, OPCODE_PUSH_NULL);
+}
+
+// 编译 this，即 this 的 nud 方法
+static void this(CompileUnit *cu, bool canAssign UNUSED) {
+    // this 如果不在类的方法中使用，则报编译错误
+    if (getEnclosingClassBK(cu) == NULL) {
+        COMPILE_ERROR(cu->curLexer, "this must be inside a class method");
+    }
+    // 生成【加载 this 对象到栈顶】的指令
+    emitLoadThis(cu);
+}
+
+// 编译 super，即 super 的 nud 方法
+static void super(CompileUnit *cu, bool canAssign) {
+    ClassBookKeep *enclosingClassBK = getEnclosingClassBK(cu);
+    // super 如果不在类的方法中使用，则报编译错误
+    if (enclosingClassBK == NULL) {
+        COMPILE_ERROR(cu->curLexer, "super must be inside a class method");
+    }
+
+    // 生成【加载 this 对象到栈顶】的指令
+    // 并不是为了调用基类作准备，而是为了保证 args[0] 始终是 this 对象，即调用 super 的子类对象，保证参数数组 args 一致
+    emitLoadThis(cu);
+
+    // super 调用有两种方式：
+    // 第一种：指定基类中的方法，形式如 super.methodName(argList)，其中 methodNam 是基类中的方法
+    if (matchToken(cu->curLexer, TOKEN_DOT)) {
+        assertCurToken(cu->curLexer, TOKEN_ID, "expect method name after '.'!");
+        // 生成【调用基类方法】的指令，方法名为 super. 后面的标识符
+        emitMethodCall(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length, OPCODE_SUPER0, canAssign);
+    } else {
+        // 第二种：调用与关键字 super 所在的子类方法同名的基类方法，形式如 super(argList)
+        // enclosingClassBK->signature 就是当前所在子类的正在编译的方法的签名
+        emitGetterMethodCall(cu, enclosingClassBK->signature, OPCODE_SUPER0);
+    }
 }
 
 // 编译程序
