@@ -178,7 +178,19 @@ SymbolBindRule Rules[] = {
     /* TOKEN_COLON */ UNUSED_RULE,
     /* TOKEN_LEFT_PAREN */ PREFIX_SYMBOL(parenthese),
     /* TOKEN_RIGHT_PAREN */ UNUSED_RULE,
+    /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, literal, subscript, subscriptMethodSignature},
+    /* TOKEN_RIGHT_BRACKET */ UNUSED_RULE,
 };
+
+// 方便和上面的 Rules 做参考
+// typedef struct
+// {
+//     const char *id;               // 符号的字符串
+//     BindPower lbp;                // 左绑定权值，不关心左操作数的符号该值为 0
+//     DenotationFn nud;             // 字面量、变量、前缀运算符等不关心左操作数的 Token 调用该方法
+//     DenotationFn led;             // 中缀运算符等关心左操作数的 Token 调用该方法
+//     methodSignatureFn methodSign; // 表示该符号在类中被视为一个方法，所以为其生成一个方法签名，语义分析中涉及方法签名生成指令
+// } SymbolBindRule;
 
 // 初始化编译单元 CompileUnit
 static void initCompileUnit(Lexer *lexer, CompileUnit *cu, CompileUnit *enclosingUnit, bool isMethod) {
@@ -975,6 +987,18 @@ static void mixMethodSignature(CompileUnit *cu UNUSED, Signature *sign UNUSED) {
     }
 }
 
+// 为下标操作符 [ 生成方法签名
+static void subscriptMethodSignature(CompileUnit *cu, Signature *sign) {
+    sign->type = SIGN_SUBSCRIPT;
+    sign->length = 0;
+    // 处理中括号之间的形参
+    processParaList(cu, sign);
+    // 参数后面必须为 ]
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACKET, "expect ']' after index list!");
+    // 判断是否有 =，如果有则 sign->type 设置为 SIGN_SUBSCRIPT_SETTER
+    trySetter(cu, sign);
+}
+
 // 语法分析的核心方法 expression，用来解析表达式结果
 // 只是负责调用符号的 led 或 nud 方法，不负责语法分析，至于 led 或 nud 方法中是否有语法分析功能，则是该符号自己协调的事
 // 这里以中缀运算符表达式 aSwTeUg 为例进行注释讲解
@@ -1015,7 +1039,7 @@ static void expression(CompileUnit *cu, BindPower rbp) {
     }
 }
 
-// 基于方法签名 生成 调用方法的指令
+// 基于方法签名生成【调用方法】的指令
 // 包括 callX 和 superX，即普通方法和基类方法
 static void emitCallBySignature(CompileUnit *cu, Signature *sign, OpCode opcode) {
     // MAX_SIGN_LEN 为方法签名的最大长度
@@ -1177,7 +1201,7 @@ static ClassBookKeep *getEnclosingClassBK(CompileUnit *cu) {
 }
 
 // 处理函数/方法实参
-// 基于实参列表生成【加载实参到运行时栈中】的指令
+// 基于实参列表生成【加载实参到运行时栈顶】的指令
 // 虚拟机执行指令后，会从左到右依次将实参压入到运行时栈，被调用的函数/方法会从栈中获取参数
 // 注：expression 就是用来计算表达式，即会生成计算表达式的一系列指令，虚拟机在执行这些指令后，就会计算出表达式的结果
 static void processArgList(CompileUnit *cu, Signature *sign) {
@@ -1432,7 +1456,7 @@ static void emitLoadModuleVar(CompileUnit *cu, const char *name) {
 // 其中 a 和 d 是 TOKEN_INTERPOLATION，b/c/e 是 TOKEN_ID，f 是 TOKEN_STRING
 static void stringInterpolation(CompileUnit *cu, bool canAssign UNUSED) {
     // 创造一个 list 实例，用来保存下面拆分字符串得到的各个部分
-    // 加载 List 模块变量
+    // 加载 List 模块变量到运行时栈顶
     emitLoadModuleVar(cu, "List");
     // 调用 List 的 new 方法，创造一个 list 实例
     emitCall(cu, "new()", 5, 0);
@@ -1518,6 +1542,70 @@ static void parenthese(CompileUnit *cu, bool canAssign UNUSED) {
     // 小括号是用来提高优先级，被括起来的表达式相当于被分成一组，作为一个整体参与计算，所以只需生成【计算该表达式的结果】的指令
     expression(cu, BP_LOWEST);
     assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after expression!");
+}
+
+// 编译用于字面量的中括号，即用于字面量的中括号的 nud 方法
+// 例如 var listA = ["duang", 1+2*3, 'x']
+// 执行本函数时，preToken 为 [，curToken 为 [ 后面的字符
+static void listLiteral(CompileUnit *cu, bool canAssign UNUSED) {
+    // 先创建 list 对象
+    // 加载 List 模块变量到运行时栈顶
+    emitLoadModuleVar(cu, "List");
+    // 调用 List 的 new 方法，创造一个 list 实例
+    emitCall(cu, "new()", 5, 0);
+
+    do {
+        // 如果当前字符为 ]，说明是空列表，即 [] ，所以无需循环
+        if (cu->curLexer->curToken.type == TOKEN_RIGHT_BRACKET) {
+            break;
+        }
+        // 先生成【计算中括号里的每一个表达式的结果，并压入到运行时栈顶】的指令，一次循环计算一个表达式
+        // 例如 var listA = ["duang", 1+2*3, 'x']，第二次循环就计算 1+2*3 的结果 7，然后将 7 压入到运行时栈顶
+        expression(cu, BP_LOWEST);
+        // 将运行时栈的计算结果弹出，并写入到 list 对象实例中
+        emitCall(cu, "addCore_()", 11, 1);
+    } while (matchToken(cu->curLexer, TOKEN_COMMA));
+
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACKET, "expect ']' after list element!");
+}
+
+// 编译用于索引 list 元素的中括号，即用于字面量的中括号的 led 方法
+// 例如 list[x]
+// 至于 map 对象实例的索引，例如 map[x]，后面会单独处理
+static void subscript(CompileUnit *cu, bool canAssign) {
+    // 确保 [] 中间不为空
+    if (matchToken(cu->curLexer, TOKEN_RIGHT_BRACKET)) {
+        COMPILE_ERROR(cu->curLexer, "need argument in the []!");
+    }
+
+    // 用于下标的 [] 有两种形式，
+    // 第一种是读列表元素如 list[x]，这是 getter 形式的下标
+    // 第二种是写列表元素如 list[x] = y，这是 setter 形式的下标，比 getter 多一个等号 =
+    // 只有在读取右中括号后才能确认是否有等号 =，因此先默认为 getter，即 subscript getter，方法形式为 [_]
+    Signature sign = {SIGN_SUBSCRIPT, "", 0, 0};
+    // 处理中括号之间的参数，即 list[x] 中的 x，生成【加载实参到运行时栈顶】指令
+    // 仅支持一个索引值，list[x,...] 是非法的，此处 processArgList 函数只处理一个参数
+    processArgList(cu, &sign);
+    // 参数后面需要右中括号 ] 结尾
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACKET, "expect '}' after argument list!");
+
+    // 如果右中括号 ] 后面有等号且为可赋值环境，说明是 setter 形式的下标，即 subscript setter，方法形式为 [_] = (_)
+    if (matchToken(cu->curLexer, TOKEN_ASSIGN) && canAssign) {
+        sign.type = SIGN_SUBSCRIPT_SETTER;
+
+        // 书中此处是有校验 sign->argNum 是否大于 MAX_ARG_NUM，个人觉得没必要
+        // 在上面初始化 sign 的时候，argNum 就被初始化为 0
+        // 在经过 processArgList 处理中括号之间的参数，仅支持一个参数，多个参数非法（虽然未强制校验）
+        // 所以到这里时，sign->argNum 必定为 1，所以没必要做 sign->argNum 是否大于 MAX_ARG_NUM 的判断
+
+        // [_] = (_) 中等号右边也算一个参数，即 [args[1]] = (args[2])
+        ++sign.argNum;
+
+        // 生成【计算右边表达式，并将计算结果压入到运行时栈顶】的指令
+        expression(cu, BP_LOWEST);
+    }
+    // 基于方法签名生成【调用方法】的指令
+    emitCallBySignature(cu, &sign, OPCODE_CALL0);
 }
 
 // 编译程序
