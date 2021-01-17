@@ -178,8 +178,10 @@ SymbolBindRule Rules[] = {
     /* TOKEN_COLON */ UNUSED_RULE,
     /* TOKEN_LEFT_PAREN */ PREFIX_SYMBOL(parenthese),
     /* TOKEN_RIGHT_PAREN */ UNUSED_RULE,
-    /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, literal, subscript, subscriptMethodSignature},
+    /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, listLiteral, subscript, subscriptMethodSignature},
     /* TOKEN_RIGHT_BRACKET */ UNUSED_RULE,
+    /* TOKEN_LEFT_BRACE */ PREFIX_SYMBOL(mapLiteral),
+    /* TOKEN_RIGHT_BRACE */ UNUSED_RULE,
     /* TOKEN_DOT */ INFIX_SYMBOL(BP_CALL, callEntry),
 };
 
@@ -1538,21 +1540,58 @@ static void super(CompileUnit *cu, bool canAssign) {
     }
 }
 
-// 编译小括号 '('，即小括号 '(' 的 nud 方法
+// 编译小括号 (，即小括号 ( 的 nud 方法
 static void parenthese(CompileUnit *cu, bool canAssign UNUSED) {
     // 小括号是用来提高优先级，被括起来的表达式相当于被分成一组，作为一个整体参与计算，所以只需生成【计算该表达式的结果】的指令
     expression(cu, BP_LOWEST);
     assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after expression!");
 }
 
+// 编译 map 对象字面量，即大括号 { 的 nud 方法
+static void mapLiteral(CompileUnit *cu, bool canAssign UNUSED) {
+    // 执行本函数时，preToken 是字符 { curToken 是字符 { 后面的字符
+    // 这种方式创建 map 对象其实是一种语法糖，内部也是先调用 Map.new() 方法创建一个 map 对象实例，然后通过 map.addCore_() 添加中括号里面的元素
+
+    // 先创建 map 对象
+    // 1. 生成【加载模块变量中的 Map 类到运行时栈顶，用于调用方法时，从该类的 methods 中定位到方法】的指令
+    emitLoadModuleVar(cu, "Map");
+    // 2. 生成【调用 Map 类的 new 方法，创造一个 map 实例】的指令
+    emitCall(cu, "new()", 5, 0);
+
+    do {
+        // 如果当前字符为 }，说明是空 map，即 {} ，所以无需循环
+        if (cu->curLexer->curToken.type == TOKEN_RIGHT_BRACE) {
+            break;
+        }
+
+        // 生成【计算冒号左边的 key 的表达式，并将计算结果压入到运行时栈】的指令
+        // 注意此处第二个参数不能传入 BP_LOWEST，否则整个 map 字面量都会被处理，正常是处理到冒号 : 就终止，原因请参见 expression 实现
+        expression(cu, BP_UNARY);
+
+        // key 和 value 之间必须为冒号 :
+        assertCurToken(cu->curLexer, TOKEN_COLON, "expect ':' after key!");
+
+        // 生成【计算冒号右边的 key 的表达式，并将计算结果压入到运行时栈】的指令
+        expression(cu, BP_LOWEST);
+
+        // 生成【调用 addCore_(_,_) 方法，将 key 和 value 写入到 map 对象实例中】
+        // 此时 value 和 key 分别位于运行时栈顶和次顶
+        emitCall(cu, "addCore_(_,_)", 13, 2);
+    } while (matchToken(cu->curLexer, TOKEN_COMMA));
+    // map 字面量定义必须以 } 结尾
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACE, "map literal should end with ')'!");
+}
+
 // 编译用于字面量的中括号，即用于字面量的中括号的 nud 方法
 // 例如 var listA = ["duang", 1+2*3, 'x']
 // 执行本函数时，preToken 为 [，curToken 为 [ 后面的字符
 static void listLiteral(CompileUnit *cu, bool canAssign UNUSED) {
+    // 这种方式创建 list 对象其实是一种语法糖，内部也是先调用 List.new() 方法创建一个 list 对象实例，然后通过 list.addCore_() 添加中括号里面的元素
+
     // 先创建 list 对象
-    // 加载 List 模块变量到运行时栈顶
+    // 1. 生成【加载模块变量中的 List 类到运行时栈顶，用于调用方法时，从该类的 methods 中定位到方法】的指令
     emitLoadModuleVar(cu, "List");
-    // 调用 List 的 new 方法，创造一个 list 实例
+    // 2. 生成【调用 List 类的 new 方法，创造一个 list 实例】的指令
     emitCall(cu, "new()", 5, 0);
 
     do {
@@ -1563,16 +1602,17 @@ static void listLiteral(CompileUnit *cu, bool canAssign UNUSED) {
         // 先生成【计算中括号里的每一个表达式的结果，并压入到运行时栈顶】的指令，一次循环计算一个表达式
         // 例如 var listA = ["duang", 1+2*3, 'x']，第二次循环就计算 1+2*3 的结果 7，然后将 7 压入到运行时栈顶
         expression(cu, BP_LOWEST);
-        // 将运行时栈的计算结果弹出，并写入到 list 对象实例中
+
+        // 将运行时栈顶的值（即表达式的计算结果）写入到 list 对象实例中
         emitCall(cu, "addCore_()", 11, 1);
     } while (matchToken(cu->curLexer, TOKEN_COMMA));
-
+    // list 字面量定义必须以 ] 结尾
     assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACKET, "expect ']' after list element!");
 }
 
 // 编译用于索引 list 元素的中括号，即用于字面量的中括号的 led 方法
+// 对 List 和 Map 对象实例均适用
 // 例如 list[x]
-// 至于 map 对象实例的索引，例如 map[x]，后面会单独处理
 static void subscript(CompileUnit *cu, bool canAssign) {
     // 确保 [] 中间不为空
     if (matchToken(cu->curLexer, TOKEN_RIGHT_BRACKET)) {
