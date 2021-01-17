@@ -173,6 +173,11 @@ SymbolBindRule Rules[] = {
     /* TOKEN_STATIC */ UNUSED_RULE,
     /* TOKEN_IS */ INEFIX_OPERATOR('is', BP_IS),
     /* TOKEN_SUPER */ PREFIX_SYMBOL(super),
+    /* TOKEN_IMPORT */ UNUSED_RULE,
+    /* TOKEN_COMMA */ UNUSED_RULE,
+    /* TOKEN_COLON */ UNUSED_RULE,
+    /* TOKEN_LEFT_PAREN */ PREFIX_SYMBOL(parenthese),
+    /* TOKEN_RIGHT_PAREN */ UNUSED_RULE,
 };
 
 // 初始化编译单元 CompileUnit
@@ -1506,6 +1511,13 @@ static void super(CompileUnit *cu, bool canAssign) {
         // enclosingClassBK->signature 就是当前所在子类的正在编译的方法的签名
         emitGetterMethodCall(cu, enclosingClassBK->signature, OPCODE_SUPER0);
     }
+}
+
+// 编译小括号 '('，即小括号 '(' 的 nud 方法
+static void parenthese(CompileUnit *cu, bool canAssign UNUSED) {
+    // 小括号是用来提高优先级，被括起来的表达式相当于被分成一组，作为一个整体参与计算，所以只需生成【计算该表达式的结果】的指令
+    expression(cu, BP_LOWEST);
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after expression!");
 }
 
 // 编译程序
