@@ -123,7 +123,7 @@ typedef struct
     }
 
 // 中缀符号（关注左操作数的符号）
-// 包括 1. 数组[  2. 函数(  3. 实例和方法之前的. 等等
+// 包括 1. 数组[  2. 函数(  3. 实例和方法之间的. 等等
 #define INFIX_SYMBOL(lbp, led)     \
     {                              \
         NULL, lbp, NULL, led, NULL \
@@ -180,6 +180,7 @@ SymbolBindRule Rules[] = {
     /* TOKEN_RIGHT_PAREN */ UNUSED_RULE,
     /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, literal, subscript, subscriptMethodSignature},
     /* TOKEN_RIGHT_BRACKET */ UNUSED_RULE,
+    /* TOKEN_DOT */ INFIX_SYMBOL(BP_CALL, callEntry),
 };
 
 // 方便和上面的 Rules 做参考
@@ -1606,6 +1607,16 @@ static void subscript(CompileUnit *cu, bool canAssign) {
     }
     // 基于方法签名生成【调用方法】的指令
     emitCallBySignature(cu, &sign, OPCODE_CALL0);
+}
+
+// 编译方法调用，即字符 . 的 led 方法
+// 面向对象语言中，方法调用就是 “对象.方法” 的形式，也就是 . 是方法调用的符号，它的左操作数是对象，右操作数是方法名
+// 调用本函数之前，对象已经由 id 函数加载到了栈中，也就是 args[0] 表示的 this
+static void callEntry(CompileUnit *cu, bool canAssign) {
+    // 执行本函数时，preToken 是字符 .  curToken 是字符 . 后面的字符
+    assertCurToken(cu->curLexer, TOKEN_ID, "expect method name after '.'!");
+    // 生成【调用方法】的指令
+    emitMethodCall(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length, OPCODE_CALL0, canAssign);
 }
 
 // 编译程序
