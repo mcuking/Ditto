@@ -1659,6 +1659,67 @@ static void callEntry(CompileUnit *cu, bool canAssign) {
     emitMethodCall(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length, OPCODE_CALL0, canAssign);
 }
 
+// 针对根据条件执行不同分支的情况，例如 a && b，当 a 为 true 时，才会执行 b，否则执行 b 后面的代码
+// 我们需要用到编译原理中常说的回填技术：
+// 在将代码编译成对应指令之外，还要额外插入不属于用户代码的跳转指令
+// 例如上面的情况，先编译 a 表达式，再编译 &&，然后再编译 b 表达式。当编译 && 时，我们需要将跳转到 b 对应指令流结束的地址的偏移量作为操作数保存起来。
+// 这样当计算 a 的值为 false 时，则根据偏移量直接跳过 b 对应的指令流，执行后面的指令流
+// 但由于在编译  && 时，还没有编译 b，并不知道 b 对应指令流的大小，所以需要设置一个特殊的数值占位符，等到编译完 b 的时候在将 && 的操作数设置成正确的偏移量
+// 这就是所谓的回填技术
+
+// 先用特殊的数值作为占位符，写入指令的操作数
+// 后续该操作数会被正确的偏移量复写
+static uint32_t emitIntstrWithPlaceholder(CompileUnit *cu, OpCode opCode) {
+    writeOpCode(cu, opCode);
+    // 地址一般为 16 位，即两个字节，也就是操作数大小为两个字节
+    // 根据大端字节序，高位地址存在内存的低地址端，低位地址存在内存的高地址端
+    // 所以先写入高位地址 0xff 到低地址端
+    writeByte(cu, 0xff);
+    // 再写入高低位地址 0xff 到高地址端
+    // 但仍旧返回高位地址所在的索引，也就是减 1 的意义，该地址用于回填，即用正确的偏移量覆盖占位符 0xff
+    return writeByte(cu, 0xff) - 1;
+}
+
+// 使用【跳转到当前指令流结束地址的偏移量】去替换【占位符 0xffff】，占位符写入逻辑请参考上面的函数
+// 其中 absIndex 就是指令流的绝对地址
+static void patchPlaceHolder(CompileUnit *cu, uint32_t absIndex) {
+    // 计算【跳转到当前指令流结束地址的偏移量】
+    // 此处之所以减 2，是因为运行时虚拟机执行该指令时，已经读入了两个字节的操作数，所以偏移量需要减 2
+    uint32_t offset = cu->fn->instrStream.count - absIndex - 2;
+
+    // 其中偏移量的高位地址写入到 absIndex 索引对应的字节中，即回填偏移量地址的高 8 位
+    // (offset >> 8) && 0xff 就是获取 offset 的高 8 位
+    // 1010 0010 1101 0001 >> 8
+    // &
+    // 0000 0000 1111 1111
+    cu->fn->instrStream.datas[absIndex] = (offset >> 8) && 0xff;
+
+    // 其中偏移量的低位地址写入到 absIndex+1 索引对应的字节中，即回填偏移量地址的低 8 位
+    // offset && 0xff 就是获取 offset 的低 8 位
+    // 1010 0010 1101 0001
+    // &
+    // 0000 0000 1111 1111
+    cu->fn->instrStream.datas[absIndex + 1] = offset && 0xff;
+}
+
+// 编译 || 符号，即符号 || 的 led 方法
+static void logicOr(CompileUnit *cu, bool canAssign UNUSED) {
+    // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 || 的左操作数
+
+    // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
+    // 其中返回的 placeholderIndex 就是该指令的操作数中用于保存高位地址的低地址端字节的地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 等到符号 || 的右操作数编译完之后，在将到右操作数编译得到的指令流结束地址的偏移量回填，替换占位符 0xffff
+    uint32_t placeholderIndex = emitIntstrWithPlaceholder(cu, OPCODE_OR);
+
+    // 生成【计算符号 || 右边表达式结果】的指令流
+    expression(cu, BP_LOGIC_OR);
+
+    // 当符号 || 右边表达式编译完后，即生成【计算符号 || 右边表达式结果】的指令流后，
+    // 调用 patchPlaceHolder 计算从【OPCODE_OR 对应的指令】 到 【符号 || 右边表达式编译的指令流结束地址】之间的偏移量，将该偏移量作为 OPCODE_OR 操作码的对应操作数
+    // 当虚拟机执行该指令时，如果符号 || 左边表达式的值为 false，则执行符号|| 右边表达式编译出来的指令流；反之，则跳过符号|| 右边表达式编译出来的指令流，执行后面的指令
+    patchPlaceHolder(cu, placeholderIndex);
+}
+
 // 编译程序
 // TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
