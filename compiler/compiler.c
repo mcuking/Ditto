@@ -130,7 +130,7 @@ typedef struct
     }
 
 // 中缀运算符，例如 - ! ~
-#define INEFIX_OPERATOR(id, lbp)                           \
+#define INFIX_OPERATOR(id, lbp)                            \
     {                                                      \
         id, lbp, NULL, infixOperator, infixMethodSignature \
     }
@@ -171,7 +171,7 @@ SymbolBindRule Rules[] = {
     /* TOKEN_CLASS */ UNUSED_RULE,
     /* TOKEN_THIS */ PREFIX_SYMBOL(this),
     /* TOKEN_STATIC */ UNUSED_RULE,
-    /* TOKEN_IS */ INEFIX_OPERATOR('is', BP_IS),
+    /* TOKEN_IS */ INFIX_OPERATOR('is', BP_IS),
     /* TOKEN_SUPER */ PREFIX_SYMBOL(super),
     /* TOKEN_IMPORT */ UNUSED_RULE,
     /* TOKEN_COMMA */ UNUSED_RULE,
@@ -183,6 +183,27 @@ SymbolBindRule Rules[] = {
     /* TOKEN_LEFT_BRACE */ PREFIX_SYMBOL(mapLiteral),
     /* TOKEN_RIGHT_BRACE */ UNUSED_RULE,
     /* TOKEN_DOT */ INFIX_SYMBOL(BP_CALL, callEntry),
+    /* TOKEN_DOT_DOT */ INFIX_OPERATOR('..', BP_RANGE),
+    /* TOKEN_ADD */ INFIX_OPERATOR('+', BP_TERM),
+    /* TOKEN_SUB */ MIX_OPERATOR('-'),
+    /* TOKEN_MUL */ INFIX_OPERATOR('*', BP_FACTOR),
+    /* TOKEN_DIV */ INFIX_OPERATOR('/', BP_FACTOR),
+    /* TOKEN_MOD */ INFIX_OPERATOR('%', BP_FACTOR),
+    /* TOKEN_ASSIGN */ UNUSED_RULE,
+    /* TOKEN_BIT_AND */ INFIX_OPERATOR('&', BP_BIT_AND),
+    /* TOKEN_BIT_OR */ INFIX_OPERATOR('|', BP_BIT_OR),
+    /* TOKEN_BIT_NOT */ PREFIX_OPERATOR('~'),
+    /* TOKEN_BIT_SHIFT_RIGHT */ INFIX_OPERATOR('>>', BP_BIT_SHIFT),
+    /* TOKEN_BIT_SHIFT_LEFT */ INFIX_OPERATOR('<<', BP_BIT_SHIFT),
+    /* TOKEN_LOGIC_AND */ INFIX_SYMBOL(BP_LOGIC_AND, logicAnd),
+    /* TOKEN_LOGIC_OR */ INFIX_SYMBOL(BP_LOGIC_OR, logicOr),
+    /* TOKEN_LOGIC_NOT */ PREFIX_OPERATOR('!'),
+    /* TOKEN_EQUAL */ INFIX_OPERATOR('==', BP_EQUAL),
+    /* TOKEN_NOT_EQUAL */ INFIX_OPERATOR('!=', BP_EQUAL),
+    /* TOKEN_GREATE */ INFIX_OPERATOR('>', BP_CMP),
+    /* TOKEN_GREATE_EQUAL */ INFIX_OPERATOR('>=', BP_CMP),
+    /* TOKEN_LESS */ INFIX_OPERATOR('<', BP_CMP),
+    /* TOKEN_LESS_EQUAL */ INFIX_OPERATOR('<=', BP_CMP),
 };
 
 // 方便和上面的 Rules 做参考
@@ -1088,6 +1109,7 @@ static void infixOperator(CompileUnit *cu, bool canAssign UNUSED) {
     // 对于中缀运算符，其对左右操作数的绑定权值相同
     BindPower rbp = rule->lbp;
     // 解析操作符的右操作数
+    // 即生成【计算右操作数的结果，并将结果压入到运行时栈顶】的指令
     expression(cu, rbp);
 
     // 例如表达式 3+2 就会被视为 3.+(2)
@@ -1101,8 +1123,8 @@ static void infixOperator(CompileUnit *cu, bool canAssign UNUSED) {
         1                 // 参数只有一个，即 op2。实际上在虚拟机中会有个默认参数，即调用该方法的对象实例，在这里就是 op1，所以就可以计算 op1 和 op2 的结果
     };
 
-    // 基于该中缀操作符方法的签名 生成 调用该中缀运算符方法的指令
-    // 方法的参数就是该符号的右操作数，或者右操作树的计算结果
+    // 基于该中缀操作符方法的签名 生成【调用该中缀运算符方法】的指令
+    // 方法的参数就是该符号的右操作数，或者右操作树的计算结果（此时虚拟机已经执行了 expression(cu, rbp) 编译的指令，右操作数的结果此处就在运行时栈顶）
     emitCallBySignature(cu, &sign, OPCODE_CALL0);
 }
 
@@ -1716,7 +1738,25 @@ static void logicOr(CompileUnit *cu, bool canAssign UNUSED) {
 
     // 当符号 || 右边表达式编译完后，即生成【计算符号 || 右边表达式结果】的指令流后，
     // 调用 patchPlaceHolder 计算从【OPCODE_OR 对应的指令】 到 【符号 || 右边表达式编译的指令流结束地址】之间的偏移量，将该偏移量作为 OPCODE_OR 操作码的对应操作数
-    // 当虚拟机执行该指令时，如果符号 || 左边表达式的值为 false，则执行符号|| 右边表达式编译出来的指令流；反之，则跳过符号|| 右边表达式编译出来的指令流，执行后面的指令
+    // 当虚拟机执行该指令时，如果符号 || 左边表达式的值为 false，则执行符号 || 右边表达式编译出来的指令流；反之，则跳过符号 || 右边表达式编译出来的指令流，直接执行后面的指令
+    patchPlaceHolder(cu, placeholderIndex);
+}
+
+// 编译 && 符号，即符号 && 的 led 方法
+static void logicAnd(CompileUnit *cu, bool canAssign UNUSED) {
+    // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 && 的左操作数
+
+    // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
+    // 其中返回的 placeholderIndex 就是该指令的操作数中用于保存高位地址的低地址端字节的地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 等到符号 && 的右操作数编译完之后，在将到右操作数编译得到的指令流结束地址的偏移量回填，替换占位符 0xffff
+    uint32_t placeholderIndex = emitIntstrWithPlaceholder(cu, OPCODE_AND);
+
+    // 生成【计算符号 && 右边表达式结果】的指令流
+    expression(cu, BP_LOGIC_AND);
+
+    // 当符号 && 右边表达式编译完后，即生成【计算符号 && 右边表达式结果】的指令流后，
+    // 调用 patchPlaceHolder 计算从【OPCODE_AND对应的指令】 到 【符号 && 右边表达式编译的指令流结束地址】之间的偏移量，将该偏移量作为 OPCODE_AND 操作码的对应操作数
+    // 当虚拟机执行该指令时，如果符号 && 左边表达式的值为 true，则执行符号 && 右边表达式编译出来的指令流；反之，则跳过符号 && 右边表达式编译出来的指令流，直接执行后面的指令
     patchPlaceHolder(cu, placeholderIndex);
 }
 
