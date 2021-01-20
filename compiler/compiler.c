@@ -204,6 +204,8 @@ SymbolBindRule Rules[] = {
     /* TOKEN_GREATE_EQUAL */ INFIX_OPERATOR('>=', BP_CMP),
     /* TOKEN_LESS */ INFIX_OPERATOR('<', BP_CMP),
     /* TOKEN_LESS_EQUAL */ INFIX_OPERATOR('<=', BP_CMP),
+    /* TOKEN_QUESTION */ INFIX_SYMBOL(BP_CONDITION, condition),
+    /* TOKEN_EOF */ UNUSED_RULE,
 };
 
 // 方便和上面的 Rules 做参考
@@ -226,6 +228,7 @@ static void initCompileUnit(Lexer *lexer, CompileUnit *cu, CompileUnit *enclosin
 
     // 三种情况：1. 模块中直接定义一级函数  2. 内层函数  3. 内层方法（即类的方法）
 
+    // enclosingUnit == NULL 说明没有直接外层单元，即当前处在模块的编译单元，也就是正在编译模块
     if (enclosingUnit == NULL) {
         // 1. 模块中直接定义一级函数，即没有外层函数
         // 当前作用域就是模块作用域
@@ -539,7 +542,7 @@ static int addUpvalue(CompileUnit *cu, bool isEnclosingLocalVar, uint32_t index)
 // 查找自由变量
 // 供内层函数向上查找被自己引用的与 name 变量同名的自由变量 upvalue，在哪个外层函数或模块中
 static int findUpvalue(CompileUnit *cu, const char *name, uint32_t length) {
-    // 已经到了模块对应的编译单元，即已经到了最外层了，仍找不到故返回 -1
+    // 已经到了模块对应的编译单元，即已经到了最外层了，直接外层编译单元为 NULL，仍找不到故返回 -1
     if (cu->enclosingUnit == NULL) {
         return -1;
     }
@@ -1308,7 +1311,8 @@ static void id(CompileUnit *cu, bool canAssign) {
     // 函数调用 > 局部变量和 upvalue > 对象实例属性 > 类静态属性 > 类的 getter 方法调用 > 模块变量
 
     // 1. 按照【函数调用】处理
-    // cu->enclosingUnit == NULL 说明是在类外，且下一个字符是 (，故可以判断是函数调用
+    // cu->enclosingUnit == NULL 说明此时处于模块的编译单元，即正在编译模块（因为模块已经是最顶级的编译单元了，已经没有直接外层编译单元了）
+    // 且下一个字符是 (，故可以判断是函数调用
     if (cu->enclosingUnit == NULL && matchToken(cu->curLexer, TOKEN_LEFT_PAREN)) {
         // 在编译函数定义时，是按照 “Fn 函数名” 的形式作为模块变量存储起来，目的是和用户定义的局部变量做区分
         // 所以在查找函数名之前，需要在前面添加 “Fn ” 前缀
@@ -1357,7 +1361,8 @@ static void id(CompileUnit *cu, bool canAssign) {
         }
 
         // 3. 按照【对象实例的属性】处理
-        // classBK != NULL 说明模块中包含类
+        // 如果正在编译一个类的时候，会将 cu->enclosingClassBK 设为所编译的类的 classBookKeep 结构，
+        // 所以如果 classBK != NULL，说明此时在编译类
         // 对象实例的属性在类中的定义形式是 “var 对象实例属性”
         if (classBK != NULL) {
             // 从类的符号属性表中查找
@@ -1389,7 +1394,8 @@ static void id(CompileUnit *cu, bool canAssign) {
         }
 
         // 4. 按照【类的静态属性】处理
-        // classBK != NULL 说明模块中包含类
+        // 如果正在编译一个类的时候，会将 cu->enclosingClassBK 设为所编译的类的 classBookKeep 结构，
+        // 所以如果 classBK != NULL，说明此时在编译类
         // 类的静态属性在类中的定义形式是 “static var 静态属性”
         // 编译类的静态属性定义时，是按照 “Cls类名 静态属性名” 的形式作为模块变量存储的（因为类的静态属性是被所有对象共享的数据，因此需要长期有效，所以保存在模块变量中）
         if (classBK != NULL) {
@@ -1424,7 +1430,9 @@ static void id(CompileUnit *cu, bool canAssign) {
         }
 
         // 5. 按照【类的 getter 方法调用】处理
-        // classBK != NULL 说明模块中包含类，方法名规定以小写字符开头
+        // 如果正在编译一个类的时候，会将 cu->enclosingClassBK 设为所编译的类的 classBookKeep 结构，
+        // 所以如果 classBK != NULL，说明此时在编译类
+        // 方法名规定以小写字符开头
         // 如果模块不按照规定，擅自以小写字符开头，则按照方法名查找，没有就报错
         if (classBK != NULL && isLocalName(name.start)) {
             // 生成【将实例对象 this 压入到运行时栈顶】的指令
@@ -1529,8 +1537,12 @@ static void null(CompileUnit *cu, bool canAssign UNUSED) {
 
 // 编译 this，即 this 的 nud 方法
 static void this(CompileUnit *cu, bool canAssign UNUSED) {
+    ClassBookKeep *enclosingClassBK = getEnclosingClassBK(cu);
+
     // this 如果不在类的方法中使用，则报编译错误
-    if (getEnclosingClassBK(cu) == NULL) {
+    // 如果正在编译一个类的时候，会将 cu->enclosingClassBK 设为所编译的类的 classBookKeep 结构，
+    // 所以如果 enclosingClassBK == NULL，说明此时并没有在编译类
+    if (enclosingClassBK == NULL) {
         COMPILE_ERROR(cu->curLexer, "this must be inside a class method");
     }
     // 生成【加载 this 对象到栈顶】的指令
@@ -1541,6 +1553,8 @@ static void this(CompileUnit *cu, bool canAssign UNUSED) {
 static void super(CompileUnit *cu, bool canAssign) {
     ClassBookKeep *enclosingClassBK = getEnclosingClassBK(cu);
     // super 如果不在类的方法中使用，则报编译错误
+    // 如果正在编译一个类的时候，会将 cu->enclosingClassBK 设为所编译的类的 classBookKeep 结构，
+    // 所以如果 enclosingClassBK == NULL，说明此时并没有在编译类
     if (enclosingClassBK == NULL) {
         COMPILE_ERROR(cu->curLexer, "super must be inside a class method");
     }
@@ -1728,8 +1742,8 @@ static void patchPlaceHolder(CompileUnit *cu, uint32_t absIndex) {
 static void logicOr(CompileUnit *cu, bool canAssign UNUSED) {
     // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 || 的左操作数
 
-    // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
-    // 其中返回的 placeholderIndex 就是该指令的操作数中用于保存高位地址的低地址端字节的地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 编译 || 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
+    // 其中返回的 placeholderIndex 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 等到符号 || 的右操作数编译完之后，在将到右操作数编译得到的指令流结束地址的偏移量回填，替换占位符 0xffff
     uint32_t placeholderIndex = emitIntstrWithPlaceholder(cu, OPCODE_OR);
 
@@ -1746,8 +1760,8 @@ static void logicOr(CompileUnit *cu, bool canAssign UNUSED) {
 static void logicAnd(CompileUnit *cu, bool canAssign UNUSED) {
     // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 && 的左操作数
 
-    // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
-    // 其中返回的 placeholderIndex 就是该指令的操作数中用于保存高位地址的低地址端字节的地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 编译 && 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
+    // 其中返回的 placeholderIndex 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 等到符号 && 的右操作数编译完之后，在将到右操作数编译得到的指令流结束地址的偏移量回填，替换占位符 0xffff
     uint32_t placeholderIndex = emitIntstrWithPlaceholder(cu, OPCODE_AND);
 
@@ -1758,6 +1772,41 @@ static void logicAnd(CompileUnit *cu, bool canAssign UNUSED) {
     // 调用 patchPlaceHolder 计算从【OPCODE_AND对应的指令】 到 【符号 && 右边表达式编译的指令流结束地址】之间的偏移量，将该偏移量作为 OPCODE_AND 操作码的对应操作数
     // 当虚拟机执行该指令时，如果符号 && 左边表达式的值为 true，则执行符号 && 右边表达式编译出来的指令流；反之，则跳过符号 && 右边表达式编译出来的指令流，直接执行后面的指令
     patchPlaceHolder(cu, placeholderIndex);
+}
+
+// 编译符号 ?: ，即符号 ?: 的 led 方法
+// 若 condition 为 true，则执行真分支对应指令，并跳过假分支对应指令，执行后面的指令；否则直接跳过真分支对应指令，直接执行假分支对应的指令，以及后面的指令
+static void condition(CompileUnit *cu, bool canAssign UNUSED) {
+    // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 ? 的左操作数
+
+    // 编译 ? 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
+    // 其中返回的 falseBranchStart 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 主要是用来保存该指令距离假分支的开始指令的偏移量
+    // 用于当 condition 为 false 时，直接跳到假分支的开始指令执行
+    // 等待真分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
+    uint32_t falseBranchStart = emitIntstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+
+    // 编译真分支代码，即生成【计算真分支代码结果，并压入到运行时栈顶】的指令
+    expression(cu, BP_LOWEST);
+
+    // 真分支后面必须为 : 符号
+    assertCurToken(cu->curLexer, TOKEN_COLON, "expect ':' after true branch!");
+
+    // 编译 : 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP，操作数是占位符 0xffff，
+    // 其中返回的 falseBranchEnd 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 主要是用来保存该指令距离假分支的结束指令的偏移量
+    // 用于当 condition 为 true 时，执行完真分支的指令后，直接跳过假分支的指令，执行后面的指令
+    // 等待假分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
+    uint32_t falseBranchEnd = emitIntstrWithPlaceholder(cu, OPCODE_JUMP);
+
+    // 编译完真分支，知道了假分支的开始地址，回填 falseBranchStart
+    patchPlaceHolder(cu, falseBranchStart);
+
+    // 编译假分支代码，即生成【计算假分支代码结果，并压入到运行时栈顶】的指令
+    expression(cu, BP_LOWEST);
+
+    // 编译完假分支，知道了假分支的结束地址，回填 falseBranchEnd
+    patchPlaceHolder(cu, falseBranchEnd);
 }
 
 // 编译程序
