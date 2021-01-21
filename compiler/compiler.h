@@ -71,7 +71,7 @@ typedef struct loop {
 typedef struct
 {
     ObjString *name;          // 类名
-    SymbolTable fields;       // 类的属性符号表
+    SymbolTable fields;       // 类的属性符号表（只包含实例属性，不包括类的静态属性）
     bool isStatic;            // 当前编译静态方法则为真
     IntBuffer instantMethods; // 实例方法的集合，只保存方法对应的索引，不保存方法体
     IntBuffer staticMehthods; // 静态方法的集合，只保存方法对应的索引，不保存方法体
