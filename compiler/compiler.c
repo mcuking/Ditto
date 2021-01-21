@@ -612,6 +612,41 @@ static int findLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
     return -1;
 }
 
+// 丢掉作用域 scopeDepth 以内（包括子作用域）的局部变量
+// 返回被丢掉的局部变量的个数
+static uint32_t discardLocalVar(CompileUnit *cu, int scopeDepth) {
+    // 如果 cu->scopeDepth == -1 ，即当前处在模块作用域中，则报错，因为模块作用域作为顶级作用域不能退出
+    ASSERT(cu->scopeDepth > -1, "upmost scope can't exit!");
+    int idx = cu->localVarNum - 1;
+
+    // 背景知识：
+    // localVars 数组中的局部变量是按照作用域的深度递增排列，即越深的作用域变量越排在 localVars 数组中的后面
+    // 作用域的 scopeDepth 范围大于 -1 的整数，作用域越深，值就越大，-1 表示模块作用域
+    // 所以遍历作用域 scopeDepth 以内（包括子作用域）的局部变量，只需要从 localVars 数组后面开始遍历，
+    // 并且保证变量所在作用域的 scopeDepth 小于传入的 scopeDepth 即可
+    while (idx >= 0 && cu->localVars[idx].scopeDepth >= scopeDepth) {
+        if (cu->localVars[idx].isUpvalue) {
+            // 如果该局部变量被内层函数使用，即对内层函数来说是自由变量 upvalue
+            // 则生成【运行时栈顶保存的是地址界限，关闭地址大于地址界限的 upvalue，然后将运行时栈顶弹出】的指令
+            // TODO: 没太搞懂该指令在这里的作用，后续实现虚拟机时再回填
+            writeByte(cu, OPCODE_CLOSE_UPVALUE);
+        } else {
+            // 否则该局部变量没有被被内层函数使用，只是普通局部变量
+            // 则生成【将运行时栈顶弹出】的指令
+            // TODO: 没太搞懂该指令在这里的作用，后续实现虚拟机时再回填
+            writeByte(cu, OPCODE_POP);
+        }
+        // 此处之所以使用 writeByte 而不是 writeOpCode，目的是不想影响 cu->fn->maxStackSlotUsedNum
+        // 注：writeOpCode 函数中，不仅向指令流中写入指令，还会计算该指令对运行时栈大小的影响，并实时更新 cu->fn->maxStackSlotUsedNum
+        // 因为局部变量是存储在运行时栈中的，退出作用域后函数的运行时栈并未回收，也就是说变量仍然在运行时栈中，不可影响的实际的栈大小
+        // TODO: 没太搞懂该指令在这里的作用，后续实现虚拟机时再回填
+        idx--;
+    }
+
+    // 返回被丢掉的局部变量的个数
+    return cu->localVarNum - 1 - idx;
+}
+
 // 添加自由变量 upvalue
 // 添加 upvalue 到 cu->upvalues，并返回其索引值，若以存在则只返回索引即可
 // isEnclosingLocalVar 表示 upvalue 是否是直接外层编译单元中的局部变量
