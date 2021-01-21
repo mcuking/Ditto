@@ -2176,6 +2176,22 @@ static void compileWhileStatement(CompileUnit *cu) {
     leaveLoopSetting(cu);
 }
 
+// 编译 return 语句
+inline static void compileReturn(CompileUnit *cu) {
+    // 执行此函数时已经读入了 return，即 preToken 为 return
+
+    if (cu->curLexer->curToken.type == TOKEN_RIGHT_BRACE) {
+        // 如果 return 后面是符号 }，则说明没有明确返回值，此时默认返回值为 NULL
+        // 生成【将 NULL 压入到运行时栈顶】的指令
+        writeOpCode(cu, OPCODE_PUSH_NULL);
+    } else {
+        // 否则就是明确了返回值，则生成【计算 return 后面的表达式，并将计算结果压入到运行时栈顶】的指令
+        expression(cu, BP_LOWEST);
+    }
+    // 生成【退出当前函数并弹出栈顶的值作为返回值】的指令
+    writeOpCode(cu, OPCODE_RETURN);
+}
+
 // 编译语句
 // 代码分为两种：
 // 1. 定义：生命数据的代码，例如定义变量、定义函数、定义类
@@ -2185,6 +2201,8 @@ static void compileStatement(CompileUnit *cu) {
         compileIfStatement(cu);
     } else if (matchToken(cu->curLexer, TOKEN_WHILE)) {
         compileWhileStatement(cu);
+    } else if (matchToken(cu->curLexer, TOKEN_RETURN)) {
+        compileReturn(cu);
     }
 }
 
