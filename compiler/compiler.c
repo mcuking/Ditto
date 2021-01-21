@@ -1903,7 +1903,7 @@ static void condition(CompileUnit *cu, bool canAssign UNUSED) {
     // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 ? 的左操作数
 
     // 编译 ? 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
-    // 其中返回的 falseBranchStart 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 返回的 falseBranchStart 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 主要是用来保存该指令距离假分支的开始指令的偏移量
     // 用于当 condition 为 false 时，直接跳到假分支的开始指令执行
     // 等待真分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
@@ -1916,7 +1916,7 @@ static void condition(CompileUnit *cu, bool canAssign UNUSED) {
     assertCurToken(cu->curLexer, TOKEN_COLON, "expect ':' after true branch!");
 
     // 编译 : 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP，操作数是占位符 0xffff，
-    // 其中返回的 falseBranchEnd 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 返回的 falseBranchEnd 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 主要是用来保存该指令距离假分支的结束指令的偏移量
     // 用于当 condition 为 true 时，执行完真分支的指令后，直接跳过假分支的指令，执行后面的指令
     // 等待假分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
@@ -2046,7 +2046,7 @@ static void compileIfStatement(CompileUnit *cu) {
     assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "missing ')' before '{' in if!");
 
     // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
-    // 其中返回的 falseBranchStart 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 返回的 falseBranchStart 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 主要是用来保存该指令距离假分支的开始指令的偏移量
     // 用于当 condition 为 false 时，直接跳到假分支的开始指令执行
     // 等待真分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
@@ -2058,7 +2058,7 @@ static void compileIfStatement(CompileUnit *cu) {
     if (matchToken(cu->curLexer, TOKEN_ELSE)) {
         // 如果有 else 分支
         // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP，操作数是占位符 0xffff，
-        // 其中返回的 falseBranchEnd 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+        // 返回的 falseBranchEnd 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
         // 主要是用来保存该指令距离假分支的结束指令的偏移量
         // 用于当 condition 为 true 时，执行完真分支的指令后，直接跳过假分支的指令，执行后面的指令
         // 等待假分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
@@ -2078,6 +2078,104 @@ static void compileIfStatement(CompileUnit *cu) {
     }
 }
 
+// 进入循环体时的相关设置
+static void enterLoopSetting(CompileUnit *cu, Loop *loop) {
+    // 执行此函数时，已经读入了 while 字符
+
+    // 将循环条件的第一条指令的地址保存为循环条件的起始指令地址
+    loop->condStartIndex = cu->fn->instrStream.count - 1;
+    // 设置循环所处的作用域，方便循环中若有 break，告诉它需要退出的作用域深度
+    loop->scopeDepth = cu->scopeDepth;
+    // 将之前的 curLoop 设置成当前循环的直接外层循环
+    loop->enclosingLoop = cu->curLoop;
+    // 将当前的循环设置成 curLoop
+    cu->curLoop = loop;
+}
+
+// 编译循环体
+static void compileLoopBody(CompileUnit *cu) {
+    // 将循环体的第一条指令的地址保存为循环体起始地址
+    cu->curLoop->bodyStartIndex = cu->fn->instrStream.count;
+    // 编译循环体
+    compileStatement(cu);
+}
+
+// 离开循环体时的相关设置
+static void leaveLoopSetting(CompileUnit *cu) {
+    // 在循环体结束处需要有一条向回跳到循环条件的起始处的指令
+    // 因为所有的跳转指令的操作数都是偏移量，且不能是负数，所以 OPCODE_JUMP 无法满足条件，该操作码只能向后跳
+    // 而此处情况需要向前跳，所以使用单独的操作码 OPCODE_LOOP，对应操作数只需是正数的偏移量即可
+
+    // 计算当前指令的下一个指令（即循环体对应指令流中的结尾指令的下一个指令）距离循环条件的起始指令地址的偏移量
+    // 其中 OPCODE_LOOP 的操作数是两个字节（保存的值是偏移量）当虚拟机读取到 OPCODE_LOOP 时，ip 已经向后移动了两个字节，因此偏移量要加上 2 个字节
+    int loopBackOffset = cu->fn->instrStream.count - cu->curLoop->condStartIndex + 2;
+    // 生成【向前跳转到循环条件起始处】的指令
+    writeOpCodeShortOperand(cu, OPCODE_LOOP, loopBackOffset);
+
+    // 循环体已经编译结束，知道了将循环体的结束地址，回填 cu->curLoop->exitIndex
+    patchPlaceHolder(cu, cu->curLoop->exitIndex);
+
+    // 在编译循环体时遇到 break，按理应该生成跳转到循环体结尾处的指令（操作码为 OPCODE_JUMP），即直接跳过循环体
+    // 但由于当时并没有完整地编译循环体，并不知道循环体结尾指令的地址，所以先生成操作码为 OPCODE_END 的指令作为占位（OPCODE_END 没有其他用途，所以没有二义性）
+    // 此时已经编译完了循环体，所以将循化体中的 操作码为 OPCODE_END 的指令 替换为 操作码为 OPCODE_JUMP，操作数为当前指令地址到循环体的结尾指令地址的偏移量 的指令
+
+    // 循环体起始指令地址
+    uint32_t idx = cu->curLoop->bodyStartIndex;
+
+    // 循环体结尾指令地址
+    uint32_t loopEndIndex = cu->fn->instrStream.count;
+
+    // 遍历循环体对应指令流中的所有指令
+    while (idx < loopEndIndex) {
+        if (cu->fn->instrStream.datas[idx] == OPCODE_END) {
+            // 如果存在 OPCODE_END 操作码（即 break 的占位符），则替换成操作码为 OPCODE_JUMP 的指令
+            cu->fn->instrStream.datas[idx] = OPCODE_JUMP;
+            // 将地址为 idx 的操作码 到 当前指令（即循环体对应指令流的结尾指令地址）的 偏移量，
+            // 设置到地址为 idx + 1 和 idx + 2 的两个操作数中，
+            // 其中偏移量的高位保存在低地址端 idx + 1，偏移量的低位保存在高地址端 idx + 2，即大段字节序
+            patchPlaceHolder(cu, idx + 1);
+            // 操作码为 OPCODE_JUMP 的指令大小为 3 个字节，包括了 1 个字节的操作码，2 个字节的操作数
+            // 所以加 3 就是指向操作码为 OPCODE_JUMP 的指令的下一个指令
+            idx += 3;
+        } else {
+            // 如果该指令不是操作码为 OPCODE_JUMP 的指令，则指向下一个指令
+            // 当前指令大小 = 操作码大小（1 个字节） + getBytesOfOperands 获取到的操作数的大小
+            idx = 1 + getBytesOfOperands(&cu->fn->instrStream.datas, cu->fn->constants.datas, idx);
+        }
+    }
+
+    // 退出当前循环体，将 cu->curLoop 恢复成当前循环体的外层循环
+    cu->curLoop = cu->curLoop->enclosingLoop;
+}
+
+// 编译 while 语句
+static void compileWhileStatement(CompileUnit *cu) {
+    Loop loop;
+
+    // 进入循环体时的相关设置
+    enterLoopSetting(cu, &loop);
+
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect '(' before condition!");
+
+    // 生成【计算循环条件表达式，并将计算结果压入到运行时栈顶】的指令
+    expression(cu, BP_LOWEST);
+
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after condition!");
+
+    // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
+    // 该函数返回的值就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 主要是用来保存 该指令 距离 循环体的对应的指令流中的结束指令地址 的的偏移量
+    // 用于当 condition 为 false 时，直接跳过循环体的指令流，执行其后面的指令
+    // 等待循环体编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
+    loop.exitIndex = emitIntstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+
+    // 编译循环体
+    compileLoopBody(cu);
+
+    // 离开循环体时的相关设置
+    leaveLoopSetting(cu);
+}
+
 // 编译语句
 // 代码分为两种：
 // 1. 定义：生命数据的代码，例如定义变量、定义函数、定义类
@@ -2085,6 +2183,8 @@ static void compileIfStatement(CompileUnit *cu) {
 static void compileStatement(CompileUnit *cu) {
     if (matchToken(cu->curLexer, TOKEN_IF)) {
         compileIfStatement(cu);
+    } else if (matchToken(cu->curLexer, TOKEN_WHILE)) {
+        compileWhileStatement(cu);
     }
 }
 
