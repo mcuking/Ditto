@@ -325,6 +325,102 @@ static void writeOpCodeShortOperand(CompileUnit *cu, OpCode opCode, int operand)
     writeShortOperand(cu, operand);
 }
 
+// 获取 ip 所指向的操作码的操作数占用的字节数
+static uint32_t getBytesOfOperands(Byte *instrStream, Value *constants, int ip) {
+    switch ((OpCode)instrStream[ip]) {
+        case OPCODE_CONSTRUCT:
+        case OPCODE_RETURN:
+        case OPCODE_END:
+        case OPCODE_CLOSE_UPVALUE:
+        case OPCODE_PUSH_NULL:
+        case OPCODE_PUSH_FALSE:
+        case OPCODE_PUSH_TRUE:
+        case OPCODE_POP:
+            return 0;
+
+        case OPCODE_CREATE_CLASS:
+        case OPCODE_LOAD_THIS_FIELD:
+        case OPCODE_STORE_THIS_FIELD:
+        case OPCODE_LOAD_FIELD:
+        case OPCODE_STORE_FIELD:
+        case OPCODE_LOAD_LOCAL_VAR:
+        case OPCODE_STORE_LOCAL_VAR:
+        case OPCODE_LOAD_UPVALUE:
+        case OPCODE_STORE_UPVALUE:
+            return 1;
+
+        case OPCODE_CALL0:
+        case OPCODE_CALL1:
+        case OPCODE_CALL2:
+        case OPCODE_CALL3:
+        case OPCODE_CALL4:
+        case OPCODE_CALL5:
+        case OPCODE_CALL6:
+        case OPCODE_CALL7:
+        case OPCODE_CALL8:
+        case OPCODE_CALL9:
+        case OPCODE_CALL10:
+        case OPCODE_CALL11:
+        case OPCODE_CALL12:
+        case OPCODE_CALL13:
+        case OPCODE_CALL14:
+        case OPCODE_CALL15:
+        case OPCODE_CALL16:
+        case OPCODE_LOAD_CONSTANT:
+        case OPCODE_LOAD_MODULE_VAR:
+        case OPCODE_STORE_MODULE_VAR:
+        case OPCODE_LOOP:
+        case OPCODE_JUMP:
+        case OPCODE_JUMP_IF_FALSE:
+        case OPCODE_AND:
+        case OPCODE_OR:
+        case OPCODE_INSTANCE_METHOD:
+        case OPCODE_STATIC_METHOD:
+            return 2;
+
+        case OPCODE_SUPER0:
+        case OPCODE_SUPER1:
+        case OPCODE_SUPER2:
+        case OPCODE_SUPER3:
+        case OPCODE_SUPER4:
+        case OPCODE_SUPER5:
+        case OPCODE_SUPER6:
+        case OPCODE_SUPER7:
+        case OPCODE_SUPER8:
+        case OPCODE_SUPER9:
+        case OPCODE_SUPER10:
+        case OPCODE_SUPER11:
+        case OPCODE_SUPER12:
+        case OPCODE_SUPER13:
+        case OPCODE_SUPER14:
+        case OPCODE_SUPER15:
+        case OPCODE_SUPER16:
+            //OPCODE_SUPERx的操作数是分别由writeOpCodeShortOperand
+            //和writeShortOperand写入的,共1个操作码和4个字节的操作数
+            return 4;
+
+        case OPCODE_CREATE_CLOSURE: {
+            // 操作码 OPCODE_CREATE_CLOSURE 的操作数是待创建闭包的函数在常量表中的索引，占 2 个字节
+
+            // 但当虚拟机执行该命令时，已经在直接外层编译单元了，是没办法直到内层函数 upvalue 数组 cu->upvalues 中哪些是直接外层编译单元的局部变量，哪些是直接外层编译单元的 upvalue
+            // 只有知道，才能在运行时栈找到对应的值，所以需要将 是直接外层编译单元的局部变量还是 upvalue 信息记录下来
+            // 这里就直接写入了直接外层编译单元的指令流 cu->enclosingUnit->fn->instrStream 中
+            // 按照 {upvalue 是否是直接编译外层单元的局部变量，upvalue 在直接外层编译单元的索引} 成对信息写入的（占两个字节），该逻辑在 endCompileUnit 函数中
+
+            // 所以最终操作数的字节数为 2 + upvalueNum * 2
+
+            // 按照大端字节序，其中 instrStream[ip + 1] 为操作数中的低位地址端，保存的是索引的高 8 位
+            // instrStream[ip + 2] 为操作数中的高位地址端，保存的是索引的低 8 位，下面就是基于两个字节的操作数的值计算出函数在常量表中的索引值
+            uint32_t fnIdx = (instrStream[ip + 1] << 8) | instrStream[ip + 2];
+
+            return 2 + (VALUE_TO_OBJFN(constants[fnIdx]))->upvalueNum * 2;
+        }
+
+        default:
+            NOT_REACHED();
+    }
+}
+
 // 向编译单元中 fn->constants 中添加常量，并返回索引
 static uint32_t addConstant(CompileUnit *cu, Value constant) {
     ValueBufferAdd(cu->curLexer->vm, &cu->fn->constants, constant);
