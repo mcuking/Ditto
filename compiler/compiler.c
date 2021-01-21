@@ -608,6 +608,34 @@ static Variable getVarFromLocalOrUpvalue(CompileUnit *cu, const char *name, uint
     return var;
 }
 
+// 赋值变量（主要是为模块变量赋值）
+static void defineVariable(CompileUnit *cu, uint32_t index) {
+    //局部变量的值只需要压入到运行时栈中即可，故无需处理
+    //模块变量并不存储在运行时栈中,因此需要将其写入相应位置
+    if (cu->scopeDepth == -1) {
+        // 生成【将运行时栈顶数据保存到索引为 index 的模块变量中】
+        writeOpCodeShortOperand(cu, OPCODE_STORE_MODULE_VAR, index);
+        // 上一指令已经将栈顶数据保存，所以此时只需要弹出栈顶数据即可
+        writeOpCode(cu, OPCODE_POP);
+    }
+}
+
+// 依次从局部变量、upvalue、模块变量中查找变量
+static Variable findVariable(CompileUnit *cu, const char *name, uint32_t length) {
+    // 先从局部变量、upvalue 中查找变量
+    Variable var = getVarFromLocalOrUpvalue(cu, name, length);
+    if (var.index != -1) {
+        return var;
+    }
+
+    // 再从模块变量中查找变量
+    var.index = getIndexFromSymbolTable(&cu->curLexer->curModule->moduleVarName, name, length);
+    if (var.index != -1) {
+        var.scopeType = VAR_SCOPE_MODULE;
+    }
+    return var;
+}
+
 // 生成【将索引为 index 的变量的值压入栈顶】的指令
 static void emitLoadVariable(CompileUnit *cu, Variable var) {
     switch (var.scopeType) {
@@ -1397,7 +1425,7 @@ static void id(CompileUnit *cu, bool canAssign) {
         // 如果正在编译一个类的时候，会将 cu->enclosingClassBK 设为所编译的类的 classBookKeep 结构，
         // 所以如果 classBK != NULL，说明此时在编译类
         // 类的静态属性在类中的定义形式是 “static var 静态属性”
-        // 编译类的静态属性定义时，是按照 “Cls类名 静态属性名” 的形式作为模块变量存储的（因为类的静态属性是被所有对象共享的数据，因此需要长期有效，所以保存在模块变量中）
+        // 编译类的静态属性定义时，是按照 “Cls类名 静态属性名” 的形式作为模块编译单元的局部变量存储的（因为类的静态属性是被所有对象共享的数据，因此需要长期有效，所以保存在模块编译单元的局部变量中）
         if (classBK != NULL) {
             char *staticFieldId = ALLOCATE_ARRAY(cu->curLexer->vm, char, MAX_ID_LEN);
             // void *memset(void *str, int c, size_t n) 复制字符 c（一个无符号字符）到参数 str 所指向的字符串的前 n 个字符
@@ -1416,8 +1444,7 @@ static void id(CompileUnit *cu, bool canAssign) {
             // 再写入静态属性名
             memmove(staticFieldId + 3 + clsLen + 1, name.start, name.length);
 
-            // TODO: 此处对书中代码存疑，类的静态属性是保存在模块变量中，所以应该是从当前模块的模块变量名字表 moduleVarName 中查找，
-            // 但是书中此处代码是调用 getVarFromLocalOrUpvalue 方法，在局部变量和自由变量 upvalue 中查找，需要后续确认
+            // 类的静态属性是保存在模块编译单元的局部变量中
             var = getVarFromLocalOrUpvalue(cu, staticFieldId, strlen(staticFieldId));
             // 释放上面申请的内存
             DEALLOCATE_ARRAY(cu->curLexer->vm, staticFieldId, MAX_ID_LEN);
@@ -1807,6 +1834,111 @@ static void condition(CompileUnit *cu, bool canAssign UNUSED) {
 
     // 编译完假分支，知道了假分支的结束地址，回填 falseBranchEnd
     patchPlaceHolder(cu, falseBranchEnd);
+}
+
+// 编译变量定义
+// 注意：变量定义不支持一次定义多个变量，例如 var a, b;
+// isStatic 表示是否是类的静态属性
+static void compileVarDefinition(CompileUnit *cu, bool isStatic) {
+    // 当执行该函数时，已经读入了关键字 var，也正是主调方函数识别到了关键字 var，才会决定调用该函数（主调方函数为 compileProgram）
+    // 此时 curToken 为 var 后面的变量名
+    // 变量名的 token 类型应该为 TOKEN_ID，否则报错
+    assertCurToken(cu->curLexer, TOKEN_ID, "missing variable name!");
+
+    Token name = cu->curLexer->preToken;
+    // 只支持一次定义单个变量，当发现变量后面有逗号，则报编译错误
+    if (cu->curLexer->curToken.type == TOKEN_COMMA) {
+        COMPILE_ERROR(cu->curLexer, "'var' only support declaring a variable.");
+    }
+
+    // 一、类中的属性（类的静态属性或实例的属性）定义，推导如下：
+    // 1. 当编译一个类的时候，会把 cu->enclosingClassBK 置为所编译类的 classBookKeep 结构，所以 cu->enclosingClassBK != NULL 说明正在编译类
+    // 2. 如果在编译的是类的方法，那么 cu->enclosingUnit 就是模块的编译单元，不可能为 NULL
+    // 3. 又因为 cu->enclosingUnit == NULL，所以肯定不是类的方法，所以只能是在编译类的静态属性或者实例属性
+    if (cu->enclosingUnit == NULL && cu->enclosingClassBK != NULL) {
+        if (isStatic) {
+            // 1. 类的静态属性
+            // 先申请一个数据缓冲区，并将其中的值均置为 0
+            char *staticFieldId = ALLOCATE_ARRAY(cu->curLexer->vm, char, MAX_ID_LEN);
+            memset(staticFieldId, 0, MAX_ID_LEN);
+
+            // 将形式为 “Cls类名 静态属性名” 的变量名写入到 staticFieldId（类的静态属性就是按照这种形式保存在模块编译单元的局部变量中的）
+            char *clsName = cu->enclosingClassBK->name->value.start;
+            uint32_t clsLen = cu->enclosingClassBK->name->value.length;
+            memmove(staticFieldId, "Cls", 3);
+            memmove(staticFieldId + 3, clsName, clsLen);
+            memmove(staticFieldId + 3 + clsLen, " ", 1);
+            memmove(staticFieldId + 3 + clsLen + 1, name.start, name.length);
+
+            if (findLocalVar(cu, staticFieldId, strlen(staticFieldId)) == -1) {
+                // 如果没有定义过，则将其声明为模块编译单元的局部变量
+                int index = declareLocalVar(cu, staticFieldId, strlen(staticFieldId));
+                // 并赋值为 NULL
+                // 先生成【将 NULL 压入栈顶】的指令
+                writeOpCode(cu, OPCODE_PUSH_NULL);
+                ASSERT(cu->scopeDepth == 0, "should in class scope");
+                // 再赋值变量，即将运行时栈顶数据 NULL 保存为变量的值
+                defineVariable(cu, index);
+
+                // 静态属性可以被赋值的，即如果静态属性后面有等号 =，就将等号后面的值作为静态变量的值
+                // 先从模块编译单元的局部变量中找到该变量
+                Variable var = findVariable(cu, staticFieldId, strlen(staticFieldId));
+                if (matchToken(cu->curLexer, TOKEN_ASSIGN)) {
+                    // 生成【计算等号右边的表达式，并将计算结果压入到运行时栈顶】的指令
+                    expression(cu, BP_LOWEST);
+                    // 生成【将栈顶数据存入索引为 index 的变量】的指令
+                    emitStoreVariable(cu, var);
+                }
+            } else {
+                // 如果已经定义，则报错--重复定义
+                // char *strchr(const char *str, int c) 在参数 str 所指向的字符串中搜索第一次出现字符 c（一个无符号字符）的位置
+                COMPILE_ERROR("static field '%s' redefinition!", strchr(staticFieldId, ' ') + 1);
+            }
+        } else {
+            // 2. 实例属性
+            ClassBookKeep *classBK = getEnclosingClassBK(cu);
+            // 从类的属性符号表 classBK->fields 查找是否有该属性
+            int fieldIndex = getIndexFromSymbolTable(&classBK->fields, name.start, name.length);
+
+            if (fieldIndex == -1) {
+                // 如果没有，就添加进去
+                fieldIndex = addSymbol(cu->curLexer->vm, &classBK->fields, name.start, name.length);
+            } else {
+                // 否则就是已经存在相同属性
+                if (fieldIndex > MAX_FIELD_NUM) {
+                    // 报错--超过类的属性个数最大值
+                    COMPILE_ERROR(cu->curLexer, "the max number of instance field is %d", MAX_FIELD_NUM);
+                } else {
+                    char id[MAX_ID_LEN] = {'\0'};
+                    memcpy(id, name.start, name.length);
+                    // 否则报错--重复定义属性
+                    COMPILE_ERROR(cu->curLexer, "instance field '%s' redefinition!", id);
+                }
+            }
+
+            // 因为实例属性仅属于实对象的私有属性，所以定义类的时候不可被初始化
+            if (matchToken(cu->curLexer, TOKEN_ASSIGN)) {
+                COMPILE_ERROR(cu->curLexer, "instance field isn't allowed initialization!");
+            }
+        }
+        return;
+    }
+
+    // 二、如果不是类中的属性定义，就当作普通的变量定义
+    if (matchToken(cu->curLexer, TOKEN_ASSIGN)) {
+        // 如果定义变量时就赋值，则就生成【计算等号右边的表达式，并将计算结果压入到运行时栈顶】的指令
+        expression(cu, BP_LOWEST);
+    } else {
+        // 否则生成【将 NULL 压入栈顶】的指令
+        // 即将 NULL 作为变量的初始值，目的是为了和上面的显示初始化保持相同的栈结构
+        writeOpCode(cu, OPCODE_PUSH_NULL);
+    }
+
+    // 声明变量（包括局部变量和模块变量）
+    uint32_t index = declareVariable(cu, name.start, name.length);
+    // 赋值变量，即将运行时栈顶数据保存为变量的值
+    // 主要是针对模块变量的，因为局部变量的值只需要压入到运行时栈中即可
+    defineVariable(cu, index);
 }
 
 // 编译程序
