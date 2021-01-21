@@ -1941,6 +1941,57 @@ static void compileVarDefinition(CompileUnit *cu, bool isStatic) {
     defineVariable(cu, index);
 }
 
+// 编译 if 语句
+static void compileIfStatement(CompileUnit *cu) {
+    // 执行此函数时已经读入了 if 字符
+    assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "missing '(' after if!");
+    // 生成【计算 if 条件表达式，并将计算结果压入到栈顶】的指令
+    expression(cu, BP_LOWEST);
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "missing ')' before '{' in if!");
+
+    // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
+    // 其中返回的 falseBranchStart 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+    // 主要是用来保存该指令距离假分支的开始指令的偏移量
+    // 用于当 condition 为 false 时，直接跳到假分支的开始指令执行
+    // 等待真分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
+    uint32_t falseBranchStart = emitIntstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+
+    // 编译真分支代码
+    compileStatement(cu);
+
+    if (matchToken(cu->curLexer, TOKEN_ELSE)) {
+        // 如果有 else 分支
+        // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP，操作数是占位符 0xffff，
+        // 其中返回的 falseBranchEnd 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
+        // 主要是用来保存该指令距离假分支的结束指令的偏移量
+        // 用于当 condition 为 true 时，执行完真分支的指令后，直接跳过假分支的指令，执行后面的指令
+        // 等待假分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
+        uint32_t falseBranchEnd = emitIntstrWithPlaceholder(cu, OPCODE_JUMP);
+
+        // 编译完真分支，知道了假分支的开始地址，回填 falseBranchStart
+        patchPlaceHolder(cu, falseBranchStart);
+
+        // 编译假分支代码，即 else 分支代码
+        compileStatement(cu);
+
+        // 编译完假分支，即 else 分支代码，知道了假分支的结束地址，回填 falseBranchEnd
+        patchPlaceHolder(cu, falseBranchEnd);
+    } else {
+        // 如果没有 else 分支，此时就是 condition 为 false 时，需要跳过整个真分支的目标地址
+        patchPlaceHolder(cu, falseBranchStart);
+    }
+}
+
+// 编译语句
+// 代码分为两种：
+// 1. 定义：生命数据的代码，例如定义变量、定义函数、定义类
+// 2. 语句：具备能动性的代码，可执行各种动作，例如 return、break 等
+static void compileStatement(CompileUnit *cu) {
+    if (matchToken(cu->curLexer, TOKEN_IF)) {
+        compileIfStatement(cu);
+    }
+}
+
 // 编译程序
 // TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
