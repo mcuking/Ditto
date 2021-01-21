@@ -58,11 +58,11 @@ typedef struct
 
 // 定义 Loop 结构（实现 while 会用到此结构）
 typedef struct loop {
-    int condStartIndex;         // 循环中条件的地址
+    int condStartIndex;         // 循环中条件的起始地址
     int bodyStartIndex;         // 循环体起始地址
-    int scopeDepth;             // 循环中若有 break，告诉他需要退出的作用域深度
+    int scopeDepth;             // 循环中若有 break，告诉它需要退出的作用域深度
     int exitIndex;              // 循环条件不满足时跳出循环体的目标地址
-    struct loop *enclosingLoop; // 外层循环
+    struct loop *enclosingLoop; // 直接外层循环
 } Loop;
 
 // 定义 ClassBookKeep 结构（用于记录类编译时的信息）
