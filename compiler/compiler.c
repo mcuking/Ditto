@@ -2186,8 +2186,9 @@ static void leaveLoopSetting(CompileUnit *cu) {
 // 编译 while 语句
 static void compileWhileStatement(CompileUnit *cu) {
     Loop loop;
+    // 调用此函数时，已经读入了关键字 while
 
-    // 进入循环体时的相关设置
+    // 进入循环添加时的相关设置
     enterLoopSetting(cu, &loop);
 
     assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect '(' before condition!");
@@ -2235,8 +2236,7 @@ inline static void compileBreak(CompileUnit *cu) {
     }
 
     // 在退出循环体之前要丢掉循环体内的局部变量
-    // 此处加 1 是为了丢掉比循环体的作用域更深一层的作用域中的局部变量
-    // TODO: 暂时未搞懂为什么要加 1，后续搞懂回填
+    // 此处加 1 是为了丢掉比循环体的作用域更深一层的作用域，即循环（包括循环条件、循环体）的作用域中的局部变量
     discardLocalVar(cu, cu->curLoop->scopeDepth + 1);
 
     // 将 break 编译为操作码为 OPCODE_END，操作数为 0xffff （2 个字节）的指令（OPCODE_END 不作他用，所以没有二义性问题），
@@ -2244,6 +2244,24 @@ inline static void compileBreak(CompileUnit *cu) {
     // 将操作码 OPCODE_END 替换为 OPCODE_JUMP，操作数替换成当前指令到循环体对应指令流的结尾指令的偏移量（相关逻辑在 leaveLoopSetting 函数中）
     // 所以不用返回需要回填的地址（即保存偏移量的地址，也就是 OPCODE_END 操作数中的高位字节地址），因为 leaveLoopSetting 中会遍历，遍历的时候会得到地址
     emitIntstrWithPlaceholder(cu, OPCODE_END);
+}
+
+// 编译 continue 语句
+inline static void compileContinue(CompileUnit *cu) {
+    if (cu->curLoop == NULL) {
+        COMPILE_ERROR(cu->curLexer, "continue should be used inside a loop!");
+    }
+
+    // 在退出循环体之前要丢掉循环体内的局部变量
+    // 此处加 1 是为了丢掉比循环体的作用域更深一层的作用域，即循环（包括循环条件、循环体）的作用域中的局部变量
+    discardLocalVar(cu, cu->curLoop->scopeDepth + 1);
+
+    // 计算当前指令的下一个指令（即循环体对应指令流中的结尾指令的下一个指令）距离循环条件的起始指令地址的偏移量
+    // 其中 OPCODE_LOOP 的操作数是两个字节（保存的值是偏移量）当虚拟机读取到 OPCODE_LOOP 时，ip 已经向后移动了两个字节，因此偏移量要加上 2 个字节
+    int loopBackOffset = cu->fn->instrStream.count - cu->curLoop->condStartIndex + 2;
+
+    // 生成【向前跳转到循环条件起始处】的指令
+    writeOpCodeShortOperand(cu, OPCODE_LOOP, loopBackOffset);
 }
 
 // 编译语句
@@ -2259,6 +2277,8 @@ static void compileStatement(CompileUnit *cu) {
         compileReturn(cu);
     } else if (matchToken(cu->curLexer, TOKEN_BREAK)) {
         compileBreak(cu);
+    } else if (matchToken(cu->curLexer, TOKEN_CONTINUE)) {
+        compileContinue(cu);
     }
 }
 
