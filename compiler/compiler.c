@@ -2215,6 +2215,7 @@ static void compileWhileStatement(CompileUnit *cu) {
 inline static void compileReturn(CompileUnit *cu) {
     // 执行此函数时已经读入了 return，即 preToken 为 return
 
+    // TODO: 判断逻辑等待后续完善
     if (cu->curLexer->curToken.type == TOKEN_RIGHT_BRACE) {
         // 如果 return 后面是符号 }，则说明没有明确返回值，此时默认返回值为 NULL
         // 生成【将 NULL 压入到运行时栈顶】的指令
@@ -2225,6 +2226,24 @@ inline static void compileReturn(CompileUnit *cu) {
     }
     // 生成【退出当前函数并弹出栈顶的值作为返回值】的指令
     writeOpCode(cu, OPCODE_RETURN);
+}
+
+// 编译 break 语句
+inline static void compileBreak(CompileUnit *cu) {
+    if (cu->curLoop == NULL) {
+        COMPILE_ERROR(cu->curLexer, "break should be used inside a loop!");
+    }
+
+    // 在退出循环体之前要丢掉循环体内的局部变量
+    // 此处加 1 是为了丢掉比循环体的作用域更深一层的作用域中的局部变量
+    // TODO: 暂时未搞懂为什么要加 1，后续搞懂回填
+    discardLocalVar(cu, cu->curLoop->scopeDepth + 1);
+
+    // 将 break 编译为操作码为 OPCODE_END，操作数为 0xffff （2 个字节）的指令（OPCODE_END 不作他用，所以没有二义性问题），
+    // 等到整个循环体编译完成后，会遍历对应指令流，找到操作码为 OPCODE_END 的指令，
+    // 将操作码 OPCODE_END 替换为 OPCODE_JUMP，操作数替换成当前指令到循环体对应指令流的结尾指令的偏移量（相关逻辑在 leaveLoopSetting 函数中）
+    // 所以不用返回需要回填的地址（即保存偏移量的地址，也就是 OPCODE_END 操作数中的高位字节地址），因为 leaveLoopSetting 中会遍历，遍历的时候会得到地址
+    emitIntstrWithPlaceholder(cu, OPCODE_END);
 }
 
 // 编译语句
@@ -2238,6 +2257,8 @@ static void compileStatement(CompileUnit *cu) {
         compileWhileStatement(cu);
     } else if (matchToken(cu->curLexer, TOKEN_RETURN)) {
         compileReturn(cu);
+    } else if (matchToken(cu->curLexer, TOKEN_BREAK)) {
+        compileBreak(cu);
     }
 }
 
