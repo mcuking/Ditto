@@ -219,6 +219,8 @@ SymbolBindRule Rules[] = {
 // } SymbolBindRule;
 
 // 初始化编译单元 CompileUnit
+// enclosingUnit 表示直接外层编译单元
+// isMethod 表示是否是类的方法
 static void initCompileUnit(Lexer *lexer, CompileUnit *cu, CompileUnit *enclosingUnit, bool isMethod) {
     lexer->curCompileUnit = cu;
     cu->curLexer = lexer;
@@ -2358,6 +2360,45 @@ static void defineMethod(CompileUnit *cu, Variable classVar, bool isStatic, int 
     // 生成【将次栈顶的方法，存储到栈顶的类的 class->methods[methodIndex] 中，其中 methodIndex 为指令的操作数】的指令
     OpCode opCode = isStatic ? OPCODE_STATIC_METHOD : OPCODE_INSTANCE_METHOD;
     writeOpCodeShortOperand(cu, opCode, methodIndex);
+}
+
+// 创建对象实例
+// constructorIndex 是构造函数的索引，创建对象实例的示例代码如下：
+// class Foo {
+//     var bar
+//     new(arg) {
+//         bar = arg
+//     }
+// }
+// var obj = Foo.new(9)
+// 注意：Foo.new(9) 中的 new 方法是类的静态方法，类定义中的 new(arg) {...} 是实例方法
+// emitCreateInstance 实现的是类的静态方法 new，在该方法中会调用类定义中的实例方法 new
+// 下面参数 sign 就是类定义中的实例方法 new 的方法签名，constructorIndex 为该方法的索引
+static void emitCreateInstance(CompileUnit *cu, Signature *sign, uint32_t constructorIndex) {
+    // 定义一个用于存储创建对象的指令的编译单元
+    CompileUnit methodCU;
+    // 初始化编译单元 methodCU，并将该编译单元作为 cu 的内层编译单元
+    initCompileUnit(cu->curLexer, &methodCU, cu, true);
+
+    // 1. 生成【类对象在当前运行时栈的栈底（即 stack[0]），该操作码会创建一个类的实例，然后用该实例替换栈底的类对象】的指令
+    writeOpCode(&methodCU, OPCODE_CONSTRUCT);
+
+    // 2. 生成【调用上个指令创建的处在栈底的实例对象的 new 方法】的指令
+    // 注：实例对象的 new 方法，会将上条指令创建的处在栈底的实例对象，压入到栈顶，并返回
+    // 即实例对象的 new 方法除了用户写的代码之外，还会在被编译的指令流尾部添加两个指令：
+    // OPODE_LOAD_LOCAL_VAR, 0（将栈底的实例对象加载到栈顶）    OPCODE_RETURN（将栈顶的实例对象返回）
+    // 该逻辑会在后面编译类的定义中的编译类中的实例方法 new() {...} 方法时看到
+    writeOpCodeShortOperand(&methodCU, (OpCode)(OPCODE_CALL0 + sign->argNum), constructorIndex);
+
+    // 3. 生成【返回 上面指令调用的实例对象的实例方法 new 返回的实例对象】的指令
+    writeOpCode(&methodCU, OPCODE_RETURN);
+
+#if DEBUG
+    endCompileUnit(&methodCU, "", 0);
+#else
+    // 生成类的静态方法 new 的闭包
+    endCompileUnit(&methodCU);
+#endif
 }
 
 // 编译程序
