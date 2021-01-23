@@ -2315,6 +2315,51 @@ static void compileStatement(CompileUnit *cu) {
     }
 }
 
+// 声明类的方法
+// 其中方法名相当于方法的标识，存储在 vm->allMethodNames
+// 方法体相当于方法的值，存储在方法所属类 class->methods
+// 声明方法只是在 vm->allMethodNames 声明方法名，不涉及方法体
+static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length) {
+    // 首先确保该方法名被录入到了 vm->allMethodNames
+    // ensureSymbolExist 方法会在 vm->allMethodNames 中查找是否存在方法名 signStr，如果存在，则直接返回对应索引；如果不存在，则插入方法名并返回索引。
+    int index = ensureSymbolExist(cu->curLexer->vm, &cu->curLexer->vm->allMethodNames, signStr, length);
+
+    // 为了防止重复声明，即方法名 signStr 对应的方法之前已经声明过了（ensureSymbolExist 方法无法做到）
+    // 定义了两个结构，ClassBookKeep->staticMehotds 保存类方法在 vm->allMethodNames 的索引
+    // ClassBookKeep->instantMehotds 保存实例方法在 vm->allMethodNames 的索引
+    // 所以从 ClassBookKeep->instantMehotds/staticMehotds 中查找是否存在与上面 ensureSymbolExist 得到的索引 index 相同的值
+    // 如果有，则就是重复声明方法名
+    IntBuffer *methods = cu->enclosingClassBK->isStatic ? &cu->enclosingClassBK->staticMehthods : &cu->enclosingClassBK->instantMethods;
+    uint32_t idx = 0;
+    while (idx < methods->count) {
+        if (methods->datas[idx] == index) {
+            COMPILE_ERROR(cu->curLexer, "repeat define method %s in class %s!", signStr, cu->enclosingClassBK->name->value.start);
+        }
+        idx++;
+    }
+
+    // 如果执行到这里，说明该类方法之前没有声明过，则将其加入到 ClassBookKeep->instantMehotds/staticMehotds，方便后续排查是否重复声明
+    IntBufferAdd(cu->curLexer->vm, methods, index);
+    return index;
+}
+
+// 定义类的方法
+// 其中方法名相当于方法的标识，存储在 vm->allMethodNames
+// 方法体相当于方法的值，存储在方法所属类的 class->methods
+// 定义方法需要将方法体存在到所属类的 class->methods 中
+// 即将索引 methodIndex 对应的方法存储到变量 classVar 指向的类的 class->methods[methodIndex] 中，methodIndex 就是该方法在 vm->allMethodNames 中的索引
+static void defineMethod(CompileUnit *cu, Variable classVar, bool isStatic, int methodIndex) {
+    // 执行此函数时，待定义的方法已经被压入到了运行时栈顶
+
+    // 生成【将方法所属类压入到运行时栈顶】的指令
+    emitLoadVariable(cu, classVar);
+
+    // 此时，运行时栈顶为方法所属类，次栈顶为待定义的方法
+    // 生成【将次栈顶的方法，存储到栈顶的类的 class->methods[methodIndex] 中，其中 methodIndex 为指令的操作数】的指令
+    OpCode opCode = isStatic ? OPCODE_STATIC_METHOD : OPCODE_INSTANCE_METHOD;
+    writeOpCodeShortOperand(cu, opCode, methodIndex);
+}
+
 // 编译程序
 // TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
