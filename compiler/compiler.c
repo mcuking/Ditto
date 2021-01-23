@@ -2349,7 +2349,7 @@ static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length) {
 // 其中方法名相当于方法的标识，存储在 vm->allMethodNames
 // 方法体相当于方法的值，存储在方法所属类的 class->methods
 // 定义方法需要将方法体存在到所属类的 class->methods 中
-// 即将索引 methodIndex 对应的方法存储到变量 classVar 指向的类的 class->methods[methodIndex] 中，methodIndex 就是该方法在 vm->allMethodNames 中的索引
+// 即将索引 methodIndex 对应的方法存储到变量 classVar 指向的类的 class->methods[methodIndex] 中，methodIndex 就是该方法名在 vm->allMethodNames 中的索引
 static void defineMethod(CompileUnit *cu, Variable classVar, bool isStatic, int methodIndex) {
     // 执行此函数时，待定义的方法已经被压入到了运行时栈顶
 
@@ -2362,8 +2362,8 @@ static void defineMethod(CompileUnit *cu, Variable classVar, bool isStatic, int 
     writeOpCodeShortOperand(cu, opCode, methodIndex);
 }
 
-// 创建对象实例
-// constructorIndex 是构造函数的索引，创建对象实例的示例代码如下：
+// 生成【创建对象实例】的方法，并将该方法闭包压入到运行时栈顶
+// 创建对象实例的示例代码如下：
 // class Foo {
 //     var bar
 //     new(arg) {
@@ -2372,9 +2372,9 @@ static void defineMethod(CompileUnit *cu, Variable classVar, bool isStatic, int 
 // }
 // var obj = Foo.new(9)
 // 注意：Foo.new(9) 中的 new 方法是类的静态方法，类定义中的 new(arg) {...} 是实例方法
-// emitCreateInstance 实现的是类的静态方法 new，在该方法中会调用类定义中的实例方法 new
-// 下面参数 sign 就是类定义中的实例方法 new 的方法签名，constructorIndex 为该方法的索引
-static void emitCreateInstance(CompileUnit *cu, Signature *sign, uint32_t constructorIndex) {
+// emitCreateInstance 实现的逻辑就是类的静态方法 new 的核心逻辑，在该方法中会调用类定义中的实例方法 new
+// 下面参数 sign 就是类定义中的实例方法 new 的方法签名，methodIndex 是该实例方法 new 的方法签名在 vm->allMethodNames 中的索引
+static void emitCreateInstance(CompileUnit *cu, Signature *sign, uint32_t methodIndex) {
     // 定义一个用于存储创建对象的指令的编译单元
     CompileUnit methodCU;
     // 初始化编译单元 methodCU，并将该编译单元作为 cu 的内层编译单元
@@ -2388,7 +2388,7 @@ static void emitCreateInstance(CompileUnit *cu, Signature *sign, uint32_t constr
     // 即实例对象的 new 方法除了用户写的代码之外，还会在被编译的指令流尾部添加两个指令：
     // OPODE_LOAD_LOCAL_VAR, 0（将栈底的实例对象加载到栈顶）    OPCODE_RETURN（将栈顶的实例对象返回）
     // 该逻辑会在后面编译类的定义中的编译类中的实例方法 new() {...} 方法时看到
-    writeOpCodeShortOperand(&methodCU, (OpCode)(OPCODE_CALL0 + sign->argNum), constructorIndex);
+    writeOpCodeShortOperand(&methodCU, (OpCode)(OPCODE_CALL0 + sign->argNum), methodIndex);
 
     // 3. 生成【返回 上面指令调用的实例对象的实例方法 new 返回的实例对象】的指令
     writeOpCode(&methodCU, OPCODE_RETURN);
@@ -2396,9 +2396,98 @@ static void emitCreateInstance(CompileUnit *cu, Signature *sign, uint32_t constr
 #if DEBUG
     endCompileUnit(&methodCU, "", 0);
 #else
-    // 生成类的静态方法 new 的闭包
+    // 生成该方法的闭包，并压入到运行时栈顶（由操作码为 OPCODE_CREATE_CLOSURE 的指令实现）
+    // 等待下面被定义为类的静态方法 new
     endCompileUnit(&methodCU);
 #endif
+}
+
+// 编译方法定义
+// isStatic 表示是否在编译类的静态方法
+static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic) {
+    // 调用此方法时，已经读入了方法名，即 curToken 为方法名
+
+    // 设置当前是否正在编译类的静态方法（如果是静态方法，方法名前面会有 static 关键字，在执行该函数的都是已经读入了方法名，所以已经知道是否是在编译静态方法了）
+    cu->enclosingClassBK->isStatic = isStatic;
+
+    // 获取方法的生成签名的函数
+    // curToken 为方法名，所以 curToken.type 为 TOKEN_ID，对应的 methodSign（用于生成方法签名的函数） 为 idMethodSignature
+    methodSignatureFn methodSign = Rules[cu->curLexer->curToken.type].methodSign;
+    if (methodSign == NULL) {
+        COMPILE_ERROR(cu->curLexer, "method need signature funtion!");
+    }
+
+    // 初始化方法签名
+    Signature sign;
+    sign.name = cu->curLexer->curToken.start;
+    sign.length = cu->curLexer->curToken.length;
+    sign.argNum = 0;
+    // 并将该签名设置成对应类的 ClassBookKeep 结构中的 signature（指向当前正在编译的方法的签名）
+    cu->enclosingClassBK->signature = &sign;
+
+    // 读入下一个 token，正常来说应该是方法名后面的符号 (
+    // 主要是为了后面调用 methodSign 构造方法签名
+    getNextToken(cu->curLexer);
+
+    // 初始化方法的编译单元
+    // 注：方法或函数都是独立的指令流，需要独立的编译单元
+    CompileUnit methodCU;
+    initCompileUnit(cu->curLexer, &methodCU, cu, true);
+
+    // 构造方法签名
+    methodSign(&methodCU, &sign);
+    // 执行完构造方法签名的函数后，curToken 应该是符号 {
+    assertCurToken(cu->curLexer, TOKEN_LEFT_BRACE, "expect '{' at the beginning of method body.");
+
+    // 构造完方法签名后，先判断下方法类型是否是构造函数，如果是构造函数且还是静态方法，就报错
+    if (cu->enclosingClassBK->isStatic && sign.type == SIGN_CONSTRUCT) {
+        COMPILE_ERROR(cu->curLexer, "constructor is not allowed to be static!");
+    }
+
+    // 将方法签名转成字符串形式
+    char signatureString[MAX_SIGN_LEN] = {'\0'};
+    uint32_t signLen = sign2String(&sign, signatureString);
+
+    // 声明方法
+    // 声明方法只是在 vm->allMethodNames 声明方法名，不涉及方法体
+    uint32_t methodIndex = declareMethod(cu, signatureString, signLen);
+
+    // 编译方法体，将编译出的指令流写入到自己的编译单元 methodCU
+    compileBody(&methodCU, sign.type == SIGN_CONSTRUCT);
+
+#if DEBUG
+    endCompileUnit(&methodCU, "", 0);
+#else
+    // 结束编译，并生成方法闭包，并压入到运行时栈顶（由操作码为 OPCODE_CREATE_CLOSURE 的指令实现）
+    endCompileUnit(&methodCU);
+#endif
+
+    // 定义方法
+    // 即将索引 methodIndex 对应的方法闭包存储到变量 classVar 指向的类的 class->methods[methodIndex] 中，methodIndex 就是该方法名在 vm->allMethodNames 中的索引
+    defineMethod(cu, classVar, isStatic, methodIndex);
+
+    // 针对类定义中的实例方法 new 方法，经过上面的处理会被编译成实例方法
+    // 需要在实例方法 new 方法基础上再创建一个类的静态方法 new，以供类直接调用生成对象实例，该静态方法 new 方法中最终也是会调用之前的实例方法 new 方法
+    // 详细逻辑请参考上面的 emitCreateInstance 方法
+    if (sign.type == SIGN_CONSTRUCT) {
+        // 生成【创建对象实例】的方法，并将该方法闭包压入到运行时栈顶，等待下面被定义为类的静态方法 new
+        emitCreateInstance(cu, &sign, methodIndex);
+
+        // 改变方法类型并重新生成方法签名和对应的字符串形式
+        sign.type = SIGN_METHOD;
+        char signatureString[MAX_SIGN_LEN] = {'\0'};
+        uint32_t signLen = sign2String(signatureString);
+        // 确保该方法签名在 vm->allMethodNames 存在，不存在的话会直接插入并返回其索引，存在的话直接返回索引
+        uint32_t constructorIndex = ensureSymbolExist(cu->curLexer->vm, cu->curLexer->vm->allMethodNames, signatureString, signLen);
+
+        // 定义新创建的类的静态方法 new
+        // 此时栈顶为【创建对象实例】的方法闭包
+        // defineMethod 的两个核心操作：
+        // 1. 将方法所属类压入到运行时栈顶，此时，运行时栈顶为方法所属类，次栈顶为待定义的方法
+        // 2. 将次栈顶的方法，存储到栈顶的类的 class->methods[methodIndex] 中，其中 methodIndex 为指令的操作数
+        // 由此便将上面 emitCreateInstance 生成【创建对象实例】的方法定义为类的静态方法 new
+        defineMethod(cu, classVar, true, constructorIndex);
+    }
 }
 
 // 编译程序
