@@ -615,7 +615,7 @@ static int findLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
 // 丢掉作用域 scopeDepth 以内（包括子作用域）的局部变量
 // 返回被丢掉的局部变量的个数
 static uint32_t discardLocalVar(CompileUnit *cu, int scopeDepth) {
-    // 如果 cu->scopeDepth == -1 ，即当前处在模块作用域中，则报错，因为模块作用域作为顶级作用域不能退出
+    // 如果 cu->scopeDepth == -1 ，即当前处在模块作用域中，则报错，因为模块作用域作为顶级作用域不能退出，确保类的静态属性得以保留
     ASSERT(cu->scopeDepth > -1, "upmost scope can't exit!");
     int idx = cu->localVarNum - 1;
 
@@ -2264,6 +2264,26 @@ inline static void compileContinue(CompileUnit *cu) {
     writeOpCodeShortOperand(cu, OPCODE_LOOP, loopBackOffset);
 }
 
+// 进入内嵌作用域
+static void enterScope(CompileUnit *cu) {
+    cu->scopeDepth++;
+}
+
+// 退出作用域
+static void leaveScope(CompileUnit *cu) {
+    if (cu->enclosingUnit != NULL) {
+        // 如果不是模块编译单元，则需要丢弃该作用域下的局部变量
+        // 因为模块编译单元的作用域作为顶级作用域不能退出，确保类的静态属性得以保留
+        uint32_t discardNum = discardLocalVar(cu, cu->scopeDepth);
+        // 该编译单元的局部变量数量减去 discardNum
+        cu->localVarNum -= discardNum;
+        // 该编译单元内所有指令对运行时栈的最终影响减去 discardNum
+        cu->stackSlotNum -= discardNum;
+    }
+    // 回到上一层作用域
+    cu->scopeDepth--;
+}
+
 // 编译语句
 // 代码分为两种：
 // 1. 定义：生命数据的代码，例如定义变量、定义函数、定义类
@@ -2279,6 +2299,19 @@ static void compileStatement(CompileUnit *cu) {
         compileBreak(cu);
     } else if (matchToken(cu->curLexer, TOKEN_CONTINUE)) {
         compileContinue(cu);
+    } else if (matchToken(cu->curLexer, TOKEN_LEFT_BRACE)) {
+        // 编译代码块，即大括号之间的代码块
+        enterScope(cu);
+        compileBlock(cu);
+        leaveScope(cu);
+    } else {
+        // 若不是以上的语法结构，则是单一表达式
+        // 生成【计算表达式，并将计算结果压入到运行时栈顶】的指令
+        expression(cu, BP_LOWEST);
+        // 生成【将运行时栈顶弹出（栈顶保存的是上一条指令计算的表达式结果）】的指令
+        // 例如 a = 1 + 2，右边表达式的结果是 3，被压入到运行时栈顶，3 会被保存到变量 a 中，
+        // 但变量 a 中只是保存了 3 的副本，也就是说只是将数值 3 复制到变量 a 所在的运行时栈相应的 slot 中，栈顶的 3 还在，因此需要被弹出
+        writeOpCode(cu, OPCODE_POP);
     }
 }
 
