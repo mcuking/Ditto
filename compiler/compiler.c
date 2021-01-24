@@ -2490,6 +2490,36 @@ static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic) {
     }
 }
 
+// 编译类体
+// 类体形式如下：
+// class Foo {
+//     var instantField
+//     static var staticField
+//     instantMethod() {
+//     }
+//     static staticMethod() {
+//     }
+//     new() {
+//     }
+// }
+static void compileClassBody(CompileUnit *cu, Variable classVar) {
+    if (matchToken(cu->curLexer, TOKEN_STATIC)) {
+        if (matchToken(cu->curLexer, TOKEN_VAR)) {
+            // 1. 类的静态属性
+            compileVarDefinition(cu, true);
+        } else {
+            // 2. 类的静态方法
+            compileMethod(cu, classVar, true);
+        }
+    } else if (matchToken(cu->curLexer, TOKEN_VAR)) {
+        // 3. 实例属性
+        compileVarDefinition(cu, false);
+    } else {
+        // 4. 实例方法
+        compileMethod(cu, classVar, false);
+    }
+}
+
 // 编译程序
 // TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
