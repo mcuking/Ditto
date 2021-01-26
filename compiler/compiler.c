@@ -2520,6 +2520,94 @@ static void compileClassBody(CompileUnit *cu, Variable classVar) {
     }
 }
 
+// 编译类定义
+static void compileClassDefinition(CompileUnit *cu) {
+    // 执行此函数时，已经读入了关键字 class
+
+    Variable classVar;
+    // 只支持在模作用域中定义类
+    if (cu->scopeDepth != -1) {
+        COMPILE_ERROR(cu->curLexer, "class definition must be in the module scope!");
+    }
+
+    classVar.scopeType = VAR_SCOPE_MODULE;
+    // 读入类名
+    assertCurToken(cu->curLexer, TOKEN_ID, "keyword class should follow by class name!");
+    // 声明类名
+    // declareVariable 方法会调用 defineModuleVar，defineModuleVar 方法会将类名插入到 curModule->moduleVarName 中，并返回索引
+    classVar.index = declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+
+    // 生成类名，用于后面创建类
+    ObjString *className = newObjString(cu->curLexer->vm, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+
+    // 将类名通过 addConstant 加载到常量表，并生成【将类名压入到运行时栈顶】的指令
+    emitLoadConstant(cu, OBJ_TO_VALUE(className));
+
+    // 处理类继承
+    if (matchToken(cu->curLoop, TOKEN_LESS)) {
+        // 如果类名后面有用于继承的关键字 <，则将关键字 < 后面的类名作为父类名，压入到栈顶
+        expression(cu, BP_CALL);
+    } else {
+        // 否则默认 object 类为父类名，压入到栈顶
+        emitLoadModuleVar(cu, "object");
+    }
+
+    // 生成【创建类】的指令
+    // 经过上面的代码，此时栈顶保存的是基类名（父类名），次栈顶保存的是类名，OPCODE_CREATE_CLASS 会将基类名所在的栈顶 slot 回收，并创建类然后存储到原来次栈顶所在的slot
+    // OPCODE_CREATE_CLASS 对应的操作数含义是属性个数，即 fieldNum，然而目前类未定义完，因此属性的个数未知，因此先临时写为 255，待类编译完成后再回填属性个数
+    int fieldNumIndex = writeOpCodeByteOperand(cu, OPCODE_CREATE_CLASS, 255);
+
+    // 到此，栈顶就保存了创建好的类
+    // 生成【把栈顶的类存储到 curModule->moduleVarValue 中，索引为 classVar.index（即和类名在 curModule->moduleVarName 中的索引相同）】的指令
+    // 也就是变量名储存在 curModule->moduleVarName 中，变量值存储在 curModule->moduleVarValue 中，两者在各个表中的索引相同
+    writeOpCodeShortOperand(cu, OPCODE_STORE_MODULE_VAR, classVar.index);
+    // 将栈顶的创建好的类弹出
+    writeOpCode(cu, OPCODE_POP);
+
+    // 初始化 ClassBookKeep 结构
+    ClassBookKeep classBK;
+    classBK.name = className;
+    classBK.isStatic = false;
+    StringBufferInit(&classBK.fields);
+    IntBufferInit(&classBK.instantMethods);
+    IntBufferInit(&classBK.staticMehthods);
+
+    // 此时 cu 是模块的编译单元，负责跟踪当前编译的类
+    // 注：类没有编译单元
+    cu->enclosingClassBK = &classBK;
+
+    // 类名后面需为符号 {
+    assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "expect '{' after class na,e in the class declaration!");
+
+    // 进入类体
+    enterScope(cu);
+
+    // 编译类体，直到遇到右大括号 } 为止
+    while (!matchToken(cu->curLexer, TOKEN_RIGHT_BRACE)) {
+        compileClassBody(cu, classVar);
+        if (cu->curLexer->curToken.type == TOKEN_EOF) {
+            COMPILE_ERROR(cu->curLexer, "expect '}' at the end of class declaration!");
+        }
+    }
+
+    // 上面 writeOpCodeByteOperand(cu, OPCODE_CREATE_CLASS, 255) 中将类的属性个数默认设置成 255，即操作码 OPCODE_CREATE_CLASS 的操作数
+    // 现在类已经编译完了，回填正确的属性个数
+    cu->fn->instrStream.datas[fieldNumIndex] = classBK.fields.count;
+
+    // classBK 用于在编译类的过程记录一些类的信息，例如 classBK.fields 收集属性，classBK.staticMehthods 收集类的静态方法 等，
+    // 方便在编译类的过程中做类似判断是否命名冲突等逻辑，等到类的编译结束时，就会回收分配给 classBK 的内存
+    symbolTableClear(cu->curLexer->vm, &classBK.fields);
+    IntBufferClear(cu->curLexer->vm, &classBK.staticMehthods);
+    IntBufferClear(cu->curLexer->vm, &classBK.instantMethods);
+
+    // enclosingClassBK 用来表示是否正在编译类，
+    // 编译完类后要置空，编译下一个类时在重新赋值
+    cu->enclosingClassBK = NULL;
+
+    // 退出类体
+    leaveScope(cu);
+}
+
 // 编译程序
 // TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
