@@ -2476,9 +2476,9 @@ static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic) {
         // 改变方法类型并重新生成方法签名和对应的字符串形式
         sign.type = SIGN_METHOD;
         char signatureString[MAX_SIGN_LEN] = {'\0'};
-        uint32_t signLen = sign2String(signatureString);
+        uint32_t signLen = strlen(signatureString);
         // 确保该方法签名在 vm->allMethodNames 存在，不存在的话会直接插入并返回其索引，存在的话直接返回索引
-        uint32_t constructorIndex = ensureSymbolExist(cu->curLexer->vm, cu->curLexer->vm->allMethodNames, signatureString, signLen);
+        uint32_t constructorIndex = ensureSymbolExist(cu->curLexer->vm, &cu->curLexer->vm->allMethodNames, signatureString, signLen);
 
         // 定义新创建的类的静态方法 new
         // 此时栈顶为【创建对象实例】的方法闭包
@@ -2565,6 +2565,7 @@ static void compileClassDefinition(CompileUnit *cu) {
     writeOpCode(cu, OPCODE_POP);
 
     // 初始化 ClassBookKeep 结构
+    // classBK 用于在编译类时跟踪类信息
     ClassBookKeep classBK;
     classBK.name = className;
     classBK.isStatic = false;
@@ -2606,6 +2607,63 @@ static void compileClassDefinition(CompileUnit *cu) {
 
     // 退出类体
     leaveScope(cu);
+}
+
+// 编译 fun 关键字形式的函数定义
+static void compileFunctionDefinition(CompileUnit *cu) {
+    // 执行此函数时已经读入了 fun 关键字
+
+    // 规定只能在模块作用域中进行 fun 关键字形式的函数定义，且也只能在模块作用域中调用
+    if (cu->enclosingUnit != NULL) {
+        COMPILE_ERROR(cu->curLexer, "'fun' should be in module scope!");
+    }
+
+    // 关键字 fun 后面需要为函数名，token 类型为 TOKEN_ID
+    assertCurToken(cu->curLexer, TOKEN_ID, "missing function name!");
+
+    // 在模块变量中声明函数名
+    // 为了和模块中自定义的变量做区分，在函数名前面添加 Fn 前缀，即 'Fn xxx\0'
+    char fnName[MAX_METHOD_NAME_LEN + 4] = {'\0'};
+    memmove(fnName, "Fn ", 3);
+    memmove(fnName + 3, cu->curLexer->curToken.start, cu->curLexer->curToken.length);
+    uint32_t fnNameIndex = declareVariable(cu, fnName, strlen(fnName));
+
+    // 初始化函数编译单元 fnCU，用于存储编译函数得到的指令流
+    CompileUnit fnCU;
+    initCompileUnit(cu->curLexer, &fnCU, cu, false);
+
+    // 创建临时方法签名，用于后续 processParaList 声明函数参数时，记录参数个数
+    Signature temFnSign = {SIGN_METHOD, "", 0, 0};
+
+    // 函数名后面需要是小括号 (
+    assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "expect '(' after function name!");
+
+    // 如果后面没有小括号 )，说明该函数有参数需要声明
+    if (!matchToken(cu->curLexer, TOKEN_RIGHT_PAREN)) {
+        // 声明函数参数为该函数的局部变量
+        processParaList(&fnCU, &temFnSign);
+        // 参数后面需要是小括号 )
+        assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after parameter list!");
+    }
+
+    // 将 processParaList 函数中记录的参数个数保存到 fn->argNum 中
+    fnCU.fn->argNum = temFnSign.argNum;
+
+    // 小括号 ) 后面需要是大括号 {
+    assertCurToken(cu->curLexer, TOKEN_LEFT_BRACE, "expect '{' at the beginning of method body.");
+
+    // 编译函数体，将指令流写入该函数对应的编译单元 fnCU
+    compileBody(&fnCU, false);
+
+#if DEBUG
+    endCompileUnit(&fnCU, fnName, strlen(fnName));
+#else
+    // 终止编译，为函数体生成闭包，并压入到运行时栈顶
+    endCompileUnit(&fnCU);
+#endif
+    // 将运行时栈顶的函数体闭包，保存到索引为 fnNameIndex 的模块变量中
+    // 即函数名保存到 curModule->moduleVarName，函数体保存到 curModule->moduleVarValue
+    defineVariable(cu, fnNameIndex);
 }
 
 // 编译程序
