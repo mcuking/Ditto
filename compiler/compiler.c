@@ -2666,6 +2666,80 @@ static void compileFunctionDefinition(CompileUnit *cu) {
     defineVariable(cu, fnNameIndex);
 }
 
+// 编译模块导入
+// import foo
+// 将按照一下形式处理：
+// System.importModule("foo")
+// import foo for bar1, bar2
+// 将按照一下形式处理：
+// var bar1 = System.getModuleVarible("foo", "bar1")
+// var bar2 = System.getModuleVarible("foo", "bar2")
+static void compileImport(CompileUnit *cu) {
+    // 执行此函数时已经读入了关键字 import
+
+    // import 后面需要为模块名，即 token 类型为 TOKEN_ID
+    assertCurToken(cu->curLexer, TOKEN_ID, "expect module name after expoert!");
+
+    // 将模块名转为字符串
+    ObjString *moduleName = newObjString(cu->curLexer->vm, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+
+    // 将模块名转化后的字符串作为变量添加到编译单元的 fn->constants 中
+    uint32_t constModIdx = addConstant(cu, VT_TO_VALUE(moduleName));
+
+    // 1. 为调用 System.importModule('foo')，生成【压入参数 System 到运行时栈顶】的指令
+    // 即压入 名为 System 的模块变量 到运行时栈中，其实是压入 其在 curModule->moduleVarName 的索引值
+    emitLoadModuleVar(cu, "System");
+
+    // 2. 为调用 System.importModule('foo')，生成【压入参数 foo 到运行时栈顶】的指令
+    // 即压入 模块名转化为字符串保存到编译单元的 fn->constants 中的索引值 到运行时栈
+    writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, constModIdx);
+
+    // 3. 生成【调用 System.importModule('foo')，此时次栈顶是调用方对象 System，栈顶是参数--模块名 foo】的指令
+    emitCall(cu, "importModule(_)", 15, 1);
+
+    // 此时栈顶是 System.importModule('foo') 的返回值
+    // 生成【弹出栈顶中的 System.importModule('foo') 的返回值】
+    writeOpCode(cu, OPCODE_POP);
+
+    // 如果后面没有关键字 for，则直接退出
+    if (!matchToken(cu->curLexer, TOKEN_FOR)) {
+        return;
+    }
+
+    // 否则后面有 for，例如 import foo for bar1, bar2，其中 bar1 和 bar2 就是 foo 模块中的变量
+    // 将其转成 var bar1 = System.getModuleVarible("foo", "bar1") var bar2 = System.getModuleVarible("foo", "bar2") 形式处理
+    do {
+        // 关键字 for 后面需要跟变量名，对应 token 类型为 TOKEN_ID
+        assertCurToken(cu->curLexer, TOKEN_ID, "expect variable name after 'for' in import!");
+
+        // 在本模块中声明导入的模块变量名，即将变量名插入到 curModule->moduleVarName，并返回对应的索引
+        uint32_t varIdx = declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+
+        // 把模块变量转为字符串
+        ObjString *constVarName = newObjString(cu->curLexer->vm, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+
+        // 将模块名转化后的字符串作为变量添加到编译单元的 fn->constants 中
+        uint32_t constVarIdx = addConstant(cu, OBJ_TO_VALUE(constVarName));
+
+        // 1. 为调用 System.getModuleVariable('foo', 'bar1')，生成【压入参数 System 到运行时栈顶】的指令
+        emitLoadModuleVar(cu, "System");
+
+        // 2. 为调用 System.getModuleVariable('foo', 'bar1')，生成【压入参数 foo 到运行时栈顶】的指令
+        writeOpCodeByteOperand(cu, OPCODE_LOAD_CONSTANT, constModIdx);
+
+        // 3. 为调用 System.getModuleVariable('foo', 'bar1')，生成【压入参数 bar1 到运行时栈顶】的指令
+        writeOpCodeByteOperand(cu, OPCODE_LOAD_CONSTANT, constVarIdx);
+
+        // 4. 生成【调用 System.getModuleVariable('foo', 'bar1')，此时次次栈顶是调用方对象 System，次栈顶是参数--模块名 foo，栈顶是参数--变量名 bar】的指令
+        emitCall(cu, "getModuleVariable(_,_)", 22, 2);
+
+        // 此时栈顶是 System.getModuleVariable('foo', 'bar1') 的返回值
+        // 将运行时栈顶的返回值保存到索引为 varIdx 的模块变量中
+        // 即导入的模块变量名保存到 curModule->moduleVarName，导入的模块变量值保存到 curModule->moduleVarValue
+        defineVariable(cu, varIdx);
+    } while (matchToken(cu->curLexer, TOKEN_COMMA));
+}
+
 // 编译程序
 // TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
