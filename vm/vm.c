@@ -111,3 +111,32 @@ inline static void createFrame(VM *vm, ObjThread *objThread, ObjClosure *objClos
     // 减去参数个数，是为了函数闭包 objClosure 可以访问到栈中自己的参数（TODO: 暂未搞懂，后续回填）
     prepareFrame(objThread, objClosure, objThread->esp - argNum);
 }
+
+// 背景知识：
+// 内层函数在引用外层函数中的局部变量，该局部变量对内层函数来说，就是自由变量 upvalue，其中又分为 open upvalue 和 closed upvalue
+// open upvalue 是其指针 upvalue->localVarPtr 所指向的局部变量未被回收，仍在运行时栈中的 upvalue
+// closed upvalue 是其指针 upvalue->localVarPtr 所指向的局部变量已经被回收，不在运行时栈的 upvalue
+// 例如：当外层函数执行完闭，会将其在运行时栈的内存回收掉，其中就包括了局部变量，如果此局部变量被内层函数引用，且该内层函数又被外部使用时，
+// 此时，就会将指针 upvalue->localVarPtr 指向的运行时栈中的局部变量的值，保存到 upvalue->closedUpvalue 变量中，
+// 同时将指针 upvalue->localVarPtr 改为指向 upvalue->closedUpvalue，这个过程就是 open upvalue 转变为 closed upvalue 的过程，也就是关闭自由变量的操作
+// 从而确保了就是被内层函数引用的局部变量在运行时栈中被回收了，内层函数仍可通过 upvalue->closedUpvalue 访问该局部变量的值。
+
+// 注意：如果某个外层函数执行完，在运行时栈的内存被回收了，其作用域以及其内嵌更深的作用域的局部变量都应该被回收，而作用域越深的变量在运行时栈中的地址就会越大，
+// （因为先调用外层函数，然后调用内层函数，所以外层函数的局部变量会先压入运行时栈，内层函数居后，而越后压入，地址也就越大）
+// 所以只需要将指针 upvalue->localVarPtr 的值（被内层函数引用的局部变量的地址）大于某个值（例如 lastSlot）的所有 upvalue 都执行自由变量操作即可
+// （upvalue 是以链表的形式保存，其中 objThread->openUpvalues 就是指向本线程中 “已经打开过的 upvalue” 的链表的首节点）
+
+// 关闭自由变量 upvalue（注：满足其指针 upvalue->localVarPtr 大于 lastSlot 的自由变量）
+static void closedUpvalue(ObjThread *objThread, Value *lastSlot) {
+    ObjUpvalue *upvalue = objThread->openUpvalues;
+    // 注意：在自由变量 upvalue 链表创建的时候，就保证了是按照 upvalue->localVarPtr 的值降序排序的，首节点的自由变量的 localVarPtr 最大
+    while (upvalue != NULL && upvalue >= lastSlot) {
+        // 将指针 upvalue->localVarPtr 指向的运行时栈中的局部变量的值，保存到 upvalue->closedUpvalue 变量中
+        upvalue->closedUpvalue = *(upvalue->localVarPtr);
+        // 将指针 upvalue->localVarPtr 改为指向 upvalue->closedUpvalue
+        upvalue->localVarPtr = &(upvalue->closedUpvalue);
+        // 获取自由变量 upvalue 链表中下一个自由变量 upvalue
+        upvalue = upvalue->next;
+    }
+    objThread->openUpvalues = upvalue;
+}
