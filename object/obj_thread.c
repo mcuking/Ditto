@@ -2,7 +2,8 @@
 #include "class.h"
 #include "vm.h"
 
-// 为线程 objThread 中运行的闭包函数 objClosure 准备运行时栈
+// 为线程 objThread 中运行的闭包函数 objClosure 准备堆栈框架，即闭包（函数或方法）的运行资源，包括如下：
+// 1.运行时栈    2.待运行的指令流    3.当前运行的指令地址 ip
 void prepareFrame(ObjThread *objThread, ObjClosure *objClosure, Value *stackStart) {
     // 如果分配的帧栈超出最大容量，则报错
     ASSERT(objThread->frameCapacity > objThread->usedFrameNum, "frame not enough!");
