@@ -1,5 +1,6 @@
 #include "class.h"
 #include "common.h"
+#include "compiler.h"
 #include "core.h"
 #include "obj_range.h"
 #include "string.h"
@@ -70,6 +71,35 @@ Class *newRawClass(VM *vm, const char *name, uint32_t fieldNum) {
     class->fieldNum = fieldNum;
     class->superClass = NULL; // 默认没有基类
     MethodBufferInit(&class->methods);
+
+    return class;
+}
+
+// 创建一个类
+// 类名为 className，属性个数为 fieldNum，基类为 superClass
+Class *newClass(VM *vm, ObjString *className, uint32_t fieldNum, Class *superClass) {
+    // 1. 先创建类的 meta 类 metaClass（为了和类做区分，类的 meta 类名称是在类的名称后面追加 metaClass）
+    // 1.1 先创建 meta 类的类名，加 10 是为了在类名 className 后面追加字符串 " metaClass"
+    char newClassName[MAX_ID_LEN + 10] = {'\0'};
+    memcpy(newClassName, className->value.start, className->value.length);
+    memcpy(newClassName + className->value.length, " metaClass", 10);
+    // 1.2 创建 mata 类
+    Class *metaClass = newRawClass(vm, newClassName, 0);
+    // 1.3 设置 meta 类的 meta 类为 classOfClass
+    metaClass->objHeader.class = vm->classOfClass;
+    // 1.4 设置 meta 类的基类为 classOfClass
+    bindSuperClass(vm, metaClass, vm->classOfClass);
+
+    // 2. 创建类
+    // 2.1 创建类的类名，仍利用之前的字符串变量 newClassName
+    memcpy(newClassName, className->value.start, className->value.length);
+    newClassName[className->value.length] = '\0';
+    // 2.2 创建类
+    Class *class = newRawClass(vm, newClassName, fieldNum);
+    // 2.3 设置类的 meta 类
+    class->objHeader.class = metaClass;
+    // 2.4 设置类的基类
+    bindSuperClass(vm, class, superClass);
 
     return class;
 }
