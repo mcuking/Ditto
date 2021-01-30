@@ -7,7 +7,11 @@ Ditto is a scripting language implemented in C
 
 本仓库目的是为了探索编程语言的底层运行机制，并不是实现一个用于实际开发的编程语言。
 
-Ditto 编程语言几乎会完全按照[《自制编程语言 基于 C 语言》](https://book.douban.com/subject/30311070/)来实现，但会在书中代码的基础上，增加非常丰富的注释，方便读者更容易地理解 Ditto 编程语言的实现思路。
+Ditto 编程语言几乎会完全按照[《自制编程语言 基于 C 语言》](https://book.douban.com/subject/30311070/)来实现，但会在书中代码的基础上，增加非常丰富的注释，方便读者更容易地理解编程语言的实现思路。
+
+作者学习[《自制编程语言 基于 C 语言》](https://book.douban.com/subject/30311070/)的目的是为了后面从语言特性解读 JS 引擎 [QuickJS](https://github.com/bellard/quickjs) 作准备，后面计划撰写一本关于 [QuickJS](https://github.com/bellard/quickjs) 源码剖析的书，欢迎阅读。相关仓库地址如下，欢迎 Star：
+
+[understand-quickjs](https://github.com/mcuking/understand-quickjs)
 
 ## 如何调试
 
