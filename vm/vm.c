@@ -211,3 +211,92 @@ static void validateSuperClass(VM *vm, Value classNameValue, uint32_t fieldNum, 
         RUN_ERROR("number of field including super exceed %d!", MAX_FIELD_NUM);
     }
 }
+
+// 修正部分指令的操作数
+static void patchOperand(Class *class, ObjFn *fn) {
+    int ip = 0;
+    OpCode opCode;
+
+    while (true) {
+        // 从头开始遍历字节码中的所有操作码
+        opCode = fn->instrStream.datas[ip];
+        // 指向操作数的第一个字节（操作数占用的字节数可能是 0个、1个、4个 等）
+        ip++;
+
+        switch (opCode) {
+            case OPCODE_LOAD_FIELD:
+            case OPCODE_STORE_FIELD:
+            case OPCODE_LOAD_THIS_FIELD:
+            case OPCODE_STORE_THIS_FIELD:
+                // 子类的实例属性数量 = 子类本身的实例属性数量 + 基类本身的实例属性数量
+                // 当编译子类时，基类可能还未编译，所以需要等到编译阶段完全结束后，
+                // 在子类本身的实例属性数量的基础上在加上基类本身的实例属性数量
+                // 该操作数表示子类的实例属性数量，只有一个字节
+                fn->instrStream.datas[ip] += class->superClass->fieldNum;
+                // 指向下一个操作码
+                ip++;
+                break;
+
+            case OPCODE_SUPER0:
+            case OPCODE_SUPER1:
+            case OPCODE_SUPER2:
+            case OPCODE_SUPER3:
+            case OPCODE_SUPER4:
+            case OPCODE_SUPER5:
+            case OPCODE_SUPER6:
+            case OPCODE_SUPER7:
+            case OPCODE_SUPER8:
+            case OPCODE_SUPER9:
+            case OPCODE_SUPER10:
+            case OPCODE_SUPER11:
+            case OPCODE_SUPER12:
+            case OPCODE_SUPER13:
+            case OPCODE_SUPER14:
+            case OPCODE_SUPER15:
+            case OPCODE_SUPER16:
+                // 操作码 OPCODE_SUPERx 用于调用基类的方法的
+                // 其操作数有 4 个字节，其中前两个字节存储 基类方法在基类中的索引 methodIndex，即 super.method[methodIndex] 表示基类的方法
+                // 后两个字节存储 基类在常量表中的索引 superClassIndex，即 constants[superClassIndex] 表示基类
+
+                // 相关指令在 emitCallBySignature 函数中写入，当时考虑到基类还没有编译，所以暂时使用 VT_NULL 代替基类插入到常量表中，
+                // 并将 VT_NULL 在常量表中的索引 作为 后两个字节的操作数，即基类在在常量表中的索引
+                // 所以只需要将常量表中的 VT_NULL 替换回基类即可，无需修改表示索引的操作数
+
+                // 先跳过操作数的前两个字节（用于存储 基类方法在基类中的索引 methodIndex）
+                ip += 2;
+
+                // 计算操作数的后两个字节所保存的值，即基类在常量表中的索引（采用大端字节序，即表示高位地址的值保存在低地址字节中）
+                uint32_t superClassIndex = (fn->instrStream.datas[ip] << 8) | fn->instrStream.datas[ip + 1];
+                // 将常量表中索引为 superClassIndex 的值替换成真正的基类
+                fn->constants.datas[superClassIndex] = OBJ_TO_VALUE(class->superClass);
+
+                // 再跳过操作数的后两个字节（用于存储 基类在常量表中的索引 superClassIndex），指向下一个操作码
+                ip += 2;
+                break;
+
+            case OPCODE_CREATE_CLOSURE:
+                // 操作码 OPCODE_CREATE_CLOSURE 的操作数为：前两个字节（用于存储待创建闭包的函数在常量表中索引）+ 不定字节数（用于存储形式为 {upvalue 是否是直接编译外层单元的局部变量，upvalue 在直接外层编译单元的索引} 的成对信息）
+                // 具体细节请参考函数 endCompileUnit 中的注释
+
+                // 计算操作数的前两个字节所保存的值，即待创建闭包的函数在常量表中索引（采用大端字节序，即表示高位地址的值保存在低地址字节中）
+                uint32_t fnIndex = (fn->instrStream.datas[ip] << 8) | fn->instrStream.datas[ip + 1];
+                // 从常量表中获取到该函数，递归调用 patchOperand 修正该函数的指令流（即字节码）中部分指令的操作数
+                patchOperand(class, VALUE_TO_OBJFN(fn->constants.datas[fnIndex]));
+
+                // 跳过 OPCODE_CREATE_CLOSURE 的操作数，指向下一个操作码
+                // 通过 getBytesOfOperands 获取到某个操作码 OPCODE_CREATE_CLOSURE 的操作数占用的字节数
+                ip += getBytesOfOperands(fn->instrStream.datas, fn->constants.datas, ip - 1);
+                break;
+
+            case OPCODE_END:
+                // 遇到操作码 OPCODE_END，表示字节码已经结束，直接退出即可
+                return;
+
+            default:
+                // 其他字节码不需要修正操作数，直接跳过指向下一个操作码即可
+                // 通过 getBytesOfOperands 获取到某个操作码的操作数占用的字节数，直接跳过即可
+                ip += getBytesOfOperands(fn->instrStream.datas, fn->constants.datas, ip - 1);
+                break;
+        }
+    }
+}

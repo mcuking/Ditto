@@ -87,4 +87,7 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t len
 // 编译模块 objModule 的方法
 ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode);
 
+// 获取 ip 所指向的操作码的操作数占用的字节数
+uint32_t getBytesOfOperands(Byte *instrStream, Value *constants, int ip);
+
 #endif
