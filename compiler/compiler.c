@@ -397,8 +397,8 @@ static uint32_t getBytesOfOperands(Byte *instrStream, Value *constants, int ip) 
         case OPCODE_SUPER14:
         case OPCODE_SUPER15:
         case OPCODE_SUPER16:
-            //OPCODE_SUPERx的操作数是分别由writeOpCodeShortOperand
-            //和writeShortOperand写入的,共1个操作码和4个字节的操作数
+            // OPCODE_SUPERx 的操作数是分别由 writeOpCodeShortOperand
+            // 和 writeShortOperand 写入的,共 1 个操作码和 4 个字节的操作数
             return 4;
 
         case OPCODE_CREATE_CLOSURE: {
@@ -1243,9 +1243,15 @@ static void emitCallBySignature(CompileUnit *cu, Signature *sign, OpCode opcode)
     // 操作数为方法在 cu->curLexer->vm->allMethodNames 的索引值
     writeOpCodeShortOperand(cu, opcode + sign->argNum, symbolIndex);
 
-    // 如果是调用基类方法，则再写入一个值为 VT_NULL 的操作数，为基类方法预留一个空位
-    // 因为基类方法可能是在子类方法之后定义，因此不能保证基类方法已经被编译完成
-    // 将来绑定方法是在装入基类
+    // 背景知识：
+    // 操作码 OPCODE_SUPERx 用于调用基类的方法的
+    // 其操作数有 4 个字节，其中前两个字节存储 基类方法在基类中的索引 methodIndex，即 super.method[methodIndex] 表示基类的方法
+    // 后两个字节存储 基类在常量中的索引 superClassIndex，即 constants[superClassIndex] 表示基类
+
+    // 如果是调用基类方法，操作数除了表示 方法索引的两个字节外，还需要再写两个字节的操作数表示 基类在常量中的索引
+    // 因为基类可能是在子类之后定义，不能保证基类此时已经被编译完成，
+    // 所以先向常量表中添加 VT_NULL，并获得 VT_NULL 在常量表中的的索引，将该索引作为后两个操作数
+    // 等到执行修正操作数的函数 patchOperand 时，再将常量表中的 VT_NULL 换成正确的基类 superClass，操作数无需修改
     if (opcode == OPCODE_SUPER0) {
         writeShortOperand(cu, addConstant(cu, VT_TO_VALUE(VT_NULL)));
     }
