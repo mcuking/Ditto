@@ -140,3 +140,43 @@ static void closedUpvalue(ObjThread *objThread, Value *lastSlot) {
     }
     objThread->openUpvalues = upvalue;
 }
+
+// 创建线程中已经打开过的 upvalue 的链表
+// 指针 localVarPtr 就是指向运行时栈中的局部变量，按照 localVarPtr 的值倒序插入到该链表
+static ObjUpvalue *createOpenUpvalue(VM *vm, ObjThread *objThread, Value *localVarPtr) {
+    // 如果 objThread->openUpvalues 链表还未创建，则创建链表，首节点为基于参数 localVarPtr 的 upvalue
+    if (objThread->openUpvalues == NULL) {
+        objThread->openUpvalues = newObjUpvalue(vm, localVarPtr);
+        return objThread->openUpvalues;
+    }
+
+    // 否则从前到后遍历链表，找到合适的位置插入新的 upvalue
+    ObjUpvalue *preUpvalue = NULL;
+    ObjUpvalue *upvalue = objThread->openUpvalues;
+
+    // 因为  upvalue 链表已经默认按照 upvalue->localVarPtr 的值倒序排列，
+    // 所以只要 upvalue->localVarPtr > localVarPtr，就继续向后遍历，直到不满足 upvalue->localVarPtr > localVarPtr 为止
+    while (upvalue != NULL && upvalue->localVarPtr > localVarPtr) {
+        preUpvalue = upvalue;
+        upvalue = upvalue->next;
+    }
+
+    // 如果之前插入了该 upvalue，直接返回即可
+    if (upvalue != NULL && upvalue->localVarPtr == localVarPtr) {
+        return upvalue;
+    }
+
+    // 否则就创建一个新的 upvalue，并插入到 upvalue 链表中
+    ObjUpvalue *newUpvalue = newObjUpvalue(vm, localVarPtr);
+
+    if (preUpvalue == NULL) {
+        // 如果 preUpvalue 仍为 NULL，说明上面的 while 循环没有执行，也就是说参数 localVarPtr 大于首节点 objThread->openUpvalues 的 localVarPtr
+        // 所以需要将基于参数 localVarPtr 的 upvalue 设置为首节点
+        objThread->openUpvalues = newUpvalue;
+    } else {
+        // 否则就在 preUpvalue 和 upvalue 之间插入基于参数 localVarPtr 的 upvalue
+        preUpvalue->next = newUpvalue;
+    }
+    newUpvalue->next = upvalue;
+    return newUpvalue;
+}
