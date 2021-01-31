@@ -124,19 +124,19 @@ static bool primObjectType(VM *vm, Value *args) {
 
 // args[0].name: 返回 args[0] 类的名字
 static bool primClassName(VM *vm UNUSED, Value *args) {
-    Class *class = VALUE_TO_OBJCLASS(args[0]);
+    Class *class = VALUE_TO_CLASS(args[0]);
     RET_OBJ(class->name);
 }
 
 // args[0].toString: 返回 args[0] 类的名字
 static bool primClassToString(VM *vm UNUSED, Value *args) {
-    Class *class = VALUE_TO_OBJCLASS(args[0]);
+    Class *class = VALUE_TO_CLASS(args[0]);
     RET_OBJ(class->name);
 }
 
 // args[0].supertype: 返回 args[0] 类的基类
 static bool primClassSupertype(VM *vm UNUSED, Value *args) {
-    Class *class = VALUE_TO_OBJCLASS(args[0]);
+    Class *class = VALUE_TO_CLASS(args[0]);
     if (class->superClass != NULL) {
         RET_OBJ(class->superClass);
     }

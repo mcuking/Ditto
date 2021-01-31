@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "compiler.h"
 #include "core.h"
 #include <stdlib.h>
 
@@ -179,4 +180,34 @@ static ObjUpvalue *createOpenUpvalue(VM *vm, ObjThread *objThread, Value *localV
     }
     newUpvalue->next = upvalue;
     return newUpvalue;
+}
+
+// 校验基类合法性
+// classNameValue 为子类类名，fieldNum 为子类的实例属性数量，superClassValue 为基类
+static void validateSuperClass(VM *vm, Value classNameValue, uint32_t fieldNum, Value superClassValue) {
+    // 首先确保 superClass 类型是 class
+    if (!VALUE_IS_CLASS(superClassValue)) {
+        ObjString *classNameString = VALUE_TO_OBJSTR(classNameValue);
+        RUN_ERROR("class \"%s\" 's superClass is not a valid class!", classNameString->value.start);
+    }
+
+    Class *superClass = VALUE_TO_CLASS(superClassValue);
+
+    // 基类不能是内建类
+    if (superClass == vm->stringClass ||
+        superClass == vm->mapClass ||
+        superClass == vm->rangeClass ||
+        superClass == vm->listClass ||
+        superClass == vm->nullClass ||
+        superClass == vm->boolClass ||
+        superClass == vm->numClass ||
+        superClass == vm->fnClass ||
+        superClass == vm->threadClass) {
+        RUN_ERROR("superClass mustn't be a builtin class!");
+    }
+
+    // 因为子类也会继承父类的实例属性，所以 子类本身的实例属性数量 + 基类的实例属性数量 不能超过 MAX_FIELD_NUM
+    if (superClass->fieldNum + fieldNum > MAX_FIELD_NUM) {
+        RUN_ERROR("number of field including super exceed %d!", MAX_FIELD_NUM);
+    }
 }
