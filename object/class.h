@@ -87,7 +87,7 @@ typedef enum {
     (ObjModule *)VALUE_TO_OBJ(value)
 
 // 将 Value 结构转成 Class 结构
-#define VALUE_TO_OBJCLASS(value) \
+#define VALUE_TO_CLASS(value) \
     (Class *)VALUE_TO_OBJ(value)
 
 /** 判断值类型 **/
