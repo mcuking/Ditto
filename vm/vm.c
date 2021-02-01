@@ -300,3 +300,32 @@ static void patchOperand(Class *class, ObjFn *fn) {
         }
     }
 }
+
+// 背景知识：
+// 各类自己的 methods 数组和 vm->allMethodNames 长度保持一致，进而 vm->allMethodNames 中的方法名和各个类的 methods 数组对应方法体的索引值相等，
+// 这样就可以通过相同的索引获取到方法体或者方法名
+// 然而 vm->allMethodNames 只有一个，但会对应多个类，所以各个类的 methods 数组中的方法体数量必然会小于 vm->allMethodNames 中的方法名数量
+// 为了保证一样长度，就需要将各个类的 methods 数组中无用的索引处用空占位填充
+
+// 修正方法对应指令流中的操作数且绑定方法到指定类上
+static void bindMethodAndPath(VM *vm, OpCode opCode, Class *class, uint32_t methodIndex, Value methodValue) {
+    // 类的静态方法由【类的 meta 类】的 methods 数组来存储
+    // 类的实例方法由【类本身】的 methods 数组来存储
+    if (opCode == OPCODE_STATIC_METHOD) {
+        // class->objHeader.class 为 class 的 meta 类
+        class = class->objHeader.class;
+    }
+
+    // 创建要绑定的方法 method
+    Method method;
+    method.type = MT_SCRIPT;
+    method.obj = VALUE_TO_OBJCLOSURE(methodValue);
+
+    // 修正方法对应指令流中的操作数
+    patchOperand(class, method.obj->fn);
+
+    // 然后绑定方法到指定类上
+    // 即将 method 插入到 class->methods.datas 数组中，索引为 methodIndex
+    // class->methods.datas[methodIndex] = method
+    bindMethod(vm, class, methodIndex, method);
+}
