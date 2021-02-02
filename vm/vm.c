@@ -376,9 +376,58 @@ loopStart:
     // 读入指令流中的操作码
     opCode = READ_BYTE();
     switch (opCode) {
+        case OPCODE_POP:
+            //【弹出栈顶】
+            DROP();
+            goto loopStart;
+
+        case OPCODE_PUSH_NULL:
+            //【将 null 压入到运行时栈顶】
+            PUSH(VT_TO_VALUE(VT_NULL));
+            goto loopStart;
+
+        case OPCODE_PUSH_TRUE:
+            //【将 true 压入到运行时栈顶】
+            PUSH(VT_TO_VALUE(VT_TRUE));
+            goto loopStart;
+
+        case OPCODE_PUSH_FALSE:
+            //【将 false 压入到运行时栈顶】
+            PUSH(VT_TO_VALUE(VT_FALSE));
+            goto loopStart;
+
+        case OPCODE_LOAD_CONSTANT:
+            //【将常量的值压入到运行时栈顶】
+            // 操作数为常量在常量表 constants 中的索引，占 2 个字节
+            PUSH(fn->constants.datas[READ_SHORT()]);
+            goto loopStart;
+
+        case OPCODE_LOAD_THIS_FIELD:
+            //【将类的实例属性的值加载到栈顶】
+            // 操作数是该属性在 objInstance->fields 数组中的索引，占 1 个字节
+            uint8_t fieldIndex = READ_BYTE();
+
+            // 既然是加载实例属性，那么位于运行时栈底 stackStart[0] 应该是实例对象，否则报错
+            ASSERT(VALUE_IS_OBJINSTANCE(stackStart[0]), "method receiver should be objInstance.");
+            ObjInstance *objInstance = VALUE_TO_OBJINSTANCE(stackStart[0]);
+            ASSERT(fieldIndex < objInstance->objHeader.class->fieldNum, "out of bounds field!");
+
+            PUSH(objInstance->fields[fieldIndex]);
+            goto loopStart;
+
         case OPCODE_LOAD_LOCAL_VAR:
-            // TODO: 待后续完成
-            break;
+            //【将局部变量在运行时栈的值压入到运行时栈顶】
+            // 操作数为局部变量在运行时栈中的索引，占 1 个字节
+            // 注意：cu->localVars 只是保存局部变量的名，局部变量的值是保存在运行时栈中的
+            PUSH(stackStart[READ_BYTE()]);
+            goto loopStart;
+
+        case OPCODE_STORE_LOCAL_VAR:
+            //【将运行时栈顶的值保存为局部变量的值，即将运行时栈顶的值写入到运行时栈中局部变量的相应位置】
+            // 操作数为局部变量在运行时栈中的索引，占 1 个字节
+            // 注意：cu->localVars 只是保存局部变量的名，局部变量的值是保存在运行时栈中的
+            stackStart[READ_BYTE()] = PEEK();
+            goto loopStart;
 
         default:
             break;
