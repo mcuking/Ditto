@@ -769,7 +769,7 @@ static Variable findVariable(CompileUnit *cu, const char *name, uint32_t length)
     return var;
 }
 
-// 生成【将索引为 index 的变量的值压入栈顶】的指令
+// 生成【将运行时栈中索引为 index 的 slot，即变量的值压入栈顶】的指令
 static void emitLoadVariable(CompileUnit *cu, Variable var) {
     switch (var.scopeType) {
         case VAR_SCOPE_LOCAL:
