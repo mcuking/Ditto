@@ -144,6 +144,7 @@ typedef char (*Primitive)(VM *vm, Value *args);
 typedef struct
 {
     // union 中的值由 type 的值决定
+    // 当 type 为 MT_FN_CALL 时，primFn 和 obj 均为空，实例对象本身就是待调用的函数
     MethodType type;
     union {
         // 指向脚本语言方法关联的 C 方法
@@ -172,7 +173,7 @@ struct class
     struct class *superClass;
     // 类中属性的数量，此数量包括了从基类继承的属性
     uint32_t fieldNum;
-    // 存储所有的方法
+    // 存储所有的实例方法
     MethodBuffer methods;
 };
 
