@@ -596,6 +596,30 @@ loopStart:
                     goto loopStart;
             }
 
+        case OPCODE_LOAD_UPVALUE:
+            //【将自由变量的值（即指针 upvalue->localVarPtr 指向的局部变量的值）压入到运行时栈顶】
+            // 操作数为自由变量在 upvalues 数组中的索引，占 1 个字节
+            PUSH(*(curFrame->closure->upvalues[READ_BYTE()]->localVarPtr));
+            goto loopStart;
+
+        case OPCODE_STORE_UPVALUE:
+            //【将运行时栈顶的值保存为自由变量的值（即指针 upvalue->localVarPtr 指向的局部变量的值）】
+            // 操作数为自由变量在 upvalues 数组中的索引，占 1 个字节
+            *(curFrame->closure->upvalues[READ_BYTE()]->localVarPtr) = PEEK();
+            goto loopStart;
+
+        case OPCODE_LOAD_MODULE_VAR:
+            //【将模块变量的值压入到运行时栈顶】
+            // 操作数为模块变量在 moduleVarValue 缓冲区中的索引，占 2 个字节
+            PUSH(fn->module->moduleVarValue.datas[READ_SHORT()]);
+            goto loopStart;
+
+        case OPCODE_STORE_MODULE_VAR:
+            //【将运行时栈顶的值保存为模块变量的值】
+            // 操作数为模块变量在 moduleVarValue 缓冲区中的索引，占 2 个字节
+            fn->module->moduleVarValue.datas[READ_SHORT()] = PEEK();
+            goto loopStart;
+
         default:
             break;
     }
