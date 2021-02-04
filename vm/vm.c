@@ -363,7 +363,7 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread) {
 // 备份当前帧栈 frame 对应的指令流进度指针 ip，以便后面重新回到该帧栈时，能够从之前指令流执行的位置继续执行
 #define STORE_CUR_FRAME() curFrame->ip = ip
 
-// 加载最新的帧栈 frame
+// 加载 curThread->frames 中最新的帧栈 frame
 #define LOAD_CUR_FRAME()
     // frames 是数组，索引从 0 开始，所以 usedFrameNum - 1
     curFrame = &curThread->frames[curThread->usedFrameNum - 1];
@@ -428,6 +428,173 @@ loopStart:
             // 注意：cu->localVars 只是保存局部变量的名，局部变量的值是保存在运行时栈中的
             stackStart[READ_BYTE()] = PEEK();
             goto loopStart;
+
+            {
+                Class *class;   // 方法所属类
+                int index;      // 方法在 class->methods 缓冲区中的索引
+                Method *method; // 方法
+                Value *args;    // 方法参数
+                int argNum;     // 方法参数个数
+
+                case OPCODE_CALL0:
+                case OPCODE_CALL1:
+                case OPCODE_CALL2:
+                case OPCODE_CALL3:
+                case OPCODE_CALL4:
+                case OPCODE_CALL5:
+                case OPCODE_CALL6:
+                case OPCODE_CALL7:
+                case OPCODE_CALL8:
+                case OPCODE_CALL9:
+                case OPCODE_CALL10:
+                case OPCODE_CALL11:
+                case OPCODE_CALL12:
+                case OPCODE_CALL13:
+                case OPCODE_CALL14:
+                case OPCODE_CALL15:
+                case OPCODE_CALL16:
+                    // 方法参数个数
+                    argNum = opCode - OPCODE_CALL0 + 1;
+
+                    // 在调用方法之前，会提前将参数压入到运行时栈中，压入顺序是先压入前面的参数
+                    // 因此 curThread->esp - argNum 指向的是第 0 个参数
+                    args = curThread->esp - argNum;
+
+                    // 分两种情况：
+                    // 如果 OPCODE_CALLx 调用的是类的静态方法，则第一个参数 args[0] 是类，通过 getClassOfObj 函数获取的就是该类的 meta 类
+                    // 如果 OPCODE_CALLx 调用的是类的静态方法，则第一个参数 args[0] 是实例对象，通过 getClassOfObj 函数获取的就是该实例对象所属的类
+                    class = getClassOfObj(vm, args[0]);
+
+                    // 操作数是方法在 class->methods 缓冲区中的索引，占 2 个字节
+                    index = READ_SHORT();
+
+                    // 从 class->methods 缓冲区取出方法
+                    method = &class->methods.datas[index];
+
+                    goto invokeMethod;
+
+                case OPCODE_SUPER0:
+                case OPCODE_SUPER1:
+                case OPCODE_SUPER2:
+                case OPCODE_SUPER3:
+                case OPCODE_SUPER4:
+                case OPCODE_SUPER5:
+                case OPCODE_SUPER6:
+                case OPCODE_SUPER7:
+                case OPCODE_SUPER8:
+                case OPCODE_SUPER9:
+                case OPCODE_SUPER10:
+                case OPCODE_SUPER11:
+                case OPCODE_SUPER12:
+                case OPCODE_SUPER13:
+                case OPCODE_SUPER14:
+                case OPCODE_SUPER15:
+                case OPCODE_SUPER16:
+                    // 方法参数个数
+                    argNum = opCode - OPCODE_SUPER0 + 1;
+
+                    // 在调用方法之前，会提前将参数压入到运行时栈中，压入顺序是先压入前面的参数
+                    // 因此 curThread->esp - argNum 指向的是第 0 个参数
+                    args = curThread->esp - argNum;
+
+                    // 背景知识：
+                    // OPCODE_SUPERx 的操作数有两个：
+                    // 第 1 个是方法在基类 superClass 中 methods 的索引，即 superClass.methods[methodIndex]，占 2 个字节
+                    // 第 2 个是基类 superClass 在常量表 constants 中的索引，即 constants[superClassIndex]，占 2 个字节
+                    // 先读入 2 个字节作为方法在基类中的索引
+                    index = READ_SHORT();
+
+                    // 再读入 2 个字节作为基类在常量表中的索引
+                    uint16_t superClassIndex = READ_SHORT();
+
+                    // 然后从常量表中取出该基类
+                    class = VALUE_TO_CLASS(fn->constants.datas[superClassIndex]);
+
+                    // 最后从基类的 methods 即 class->methods 缓冲区中取出方法
+                    method = &class->methods.datas[index];
+
+                    goto invokeMethod;
+
+                invokeMethod:
+                    // 如果方法不存在，则报错
+                    if ((uint32_t)index > class->methods.count || method->type == MT_NONE) {
+                        RUN_ERROR("method \"%s\" not found!", vm->allMethodNames.datas[index].str);
+                    }
+                    switch (method->type) {
+                        // 用 C 实现的原生方法
+                        case MT_PRIMITIVE:
+                            // 执行原生方法
+                            if (method->primFn(vm, args)) {
+                                // 如果返回结果为 true，说明原生方法执行正常，则回收该方法参数在运行时栈的空间
+                                // argNum 减 1 是为了避免回收第一个参数 args[0]
+                                // 因为被调用的方法用 args[0] 存储返回值，并由于主调方和被调方的运行时栈接壤，
+                                // 所以主调方才能在自己的栈顶（即此处的 args[0]）获取被调用方法的执行结果
+                                // 注意：args[0] 所在的 slot 就是 stackStart[0]，即本方法运行时栈的起始
+                                curThread->esp -= argNum - 1;
+                            } else {
+                                // 如果返回结果为 false，则有两种情况：
+                                // 1. 方法执行出错，无法运行下去（例如 primThreadAbort 使线程报错或无错退出）
+                                // 2. 被调用的方法调用 Thread.yield（该方法返回 false），主动交出使用权，让下一个线程运行
+                                // 总结来说就是切换线程
+
+                                // 首先备份当前帧栈 frame 对应的指令流进度指针 ip，以便后面重新回到该帧栈时，能够从之前指令流执行的位置继续执行
+                                STORE_CUR_FRAME();
+
+                                // 如果 curThread->errorObj 不为空，说明是第 1 种情况--方法执行出错，导致切换线程的
+                                if (!VALUE_IS_NULL(curThread->errorObj)) {
+                                    // 直接报错
+                                    if (VALUE_IS_OBJSTR(curThread->errorObj)) {
+                                        ObjString *err = VALUE_TO_OBJSTR(curThread->errorObj);
+                                        printf("%s", err->value.start);
+                                    }
+                                    // 并将该方法的错误返回值（位于第一个参数 args[0] 中，即运行时栈顶），置为 NULL
+                                    PEEK() = VT_TO_VALUE(VT_NULL);
+                                }
+
+                                // 如果 vm->curThread 为 NULL，说明没有待执行的线程了，因此虚拟机执行完毕
+                                if (vm->curThread == NULL) {
+                                    return VM_RESULT_SUCESS;
+                                }
+
+                                // 切换到下一个线程
+                                curThread = vm->curThread;
+
+                                // 加载 curThread->frames 中最新的帧栈 frame
+                                LOAD_CUR_FRAME();
+                            }
+                            break;
+
+                        // 用脚本语言实现的方法
+                        case MT_SCRIPT:
+                            // 备份当前帧栈 frame 对应的指令流进度指针 ip
+                            STORE_CUR_FRAME();
+                            // 为线程 objThread 中运行的函数闭包 objClosure 准备帧栈 Frame，即闭包（函数或方法）的运行资源
+                            // 该函数执行完之后，该函数创建的帧栈就是 curThread->frames 中最新的帧栈
+                            createFrame(vm, curThread, (ObjClosure *)method->obj, argNum);
+                            // 加载 curThread->frames 中最新的帧栈 frame
+                            LOAD_CUR_FRAME();
+                            break;
+
+                        // 关于函数对象的调用方法，用于实现函数重载，如 fun1.call()
+                        case MT_FN_CALL:
+                            // 该类型的方法，实例对象本身就是待调用的函数（即第一个参数 args[0] 就是待调用的函数闭包）
+                            ASSERT(VALUE_IS_OBJCLOSURE(args[0]), "instance must be a closure!");
+                            // 备份当前帧栈 frame 对应的指令流进度指针 ip
+                            STORE_CUR_FRAME();
+                            // 为线程 objThread 中运行的函数闭包 objClosure 准备帧栈 Frame，即闭包（函数或方法）的运行资源
+                            // 该函数执行完之后，该函数创建的帧栈就是 curThread->frames 中最新的帧栈
+                            // 注意：该类型的方法，实例对象本身就是待调用的函数（即第一个参数 args[0] 就是待调用的函数闭包）
+                            createFrame(vm, curThread, VALUE_TO_OBJCLOSURE(args[0]), argNum);
+                            // 加载 curThread->frames 中最新的帧栈 frame
+                            LOAD_CUR_FRAME();
+                            break;
+
+                        default:
+                            NOT_REACHED();
+                    }
+
+                    goto loopStart;
+            }
 
         default:
             break;
