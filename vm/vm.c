@@ -620,6 +620,64 @@ loopStart:
             fn->module->moduleVarValue.datas[READ_SHORT()] = PEEK();
             goto loopStart;
 
+        case OPCODE_STORE_THIS_FIELD:
+            //【将运行时栈顶的值保存为 this 实例对象的属性值】
+            // 操作数为该属性在实例对象 fields 数组中的索引，占 1 个字节
+            // 此时运行时栈底（即第 0 个 slot）的值就是实例对象，属性值就是存储在实例对象的 fields 数组中
+
+            uint8_t fieldIndex = READ_BYTE();
+
+            // 此时运行时栈底（即第 0 个 slot）的值应该是实例对象，否则报错
+            ASSERT(VALUE_IS_OBJINSTANCE(stackStart[0]), "receiver should be instance!");
+
+            ObjInstance *objInstance = VALUE_TO_OBJINSTANCE(stackStart[0]);
+
+            // 属性索引 应该小于 该实例对象所属的类的实例属性个数，否则报错
+            ASSERT(fieldIndex < objInstance->objHeader.class->fieldNum, "out of bounds field!");
+
+            // 从栈顶获取属性值后，写入到实例对象的 fields 数组中
+            objInstance->fields[fieldIndex] = PEEK();
+            goto loopStart;
+
+        case OPCODE_LOAD_FIELD:
+            //【将实例对象的属性值压入到运行时栈顶】
+            // 操作数为该属性在实例对象 fields 数组中的索引，占 1 个字节
+            // 此时运行时栈顶应该是实例对象（在执行该指令之前，会先执行压入实例对象到栈顶的指令）
+            uint8_t fieldIndex = READ_BYTE();
+
+            Value receiver = POP();
+
+            // 此时运行时栈顶应该是实例对象，否则报错
+            ASSERT(VALUE_IS_OBJINSTANCE(receiver), "receiver should be instance!");
+
+            ObjInstance *objInstance = VALUE_TO_OBJINSTANCE(receiver);
+
+            // 属性索引 应该小于 该实例对象所属的类的实例属性个数，否则报错
+            ASSERT(fieldIndex < objInstance->objHeader.class->fieldNum, "out of bounds field!");
+
+            PUSH(objInstance->fields[fieldIndex]);
+            goto loopStart;
+
+        case OPCODE_STORE_FIELD:
+            //【将运行时栈顶的值保存为实例对象的属性值】
+            // 操作数为该属性在实例对象 fields 数组中的索引，占 1 个字节
+            // 此时运行时栈顶应该是实例对象，次栈顶为属性值
+            uint8_t fieldIndex = READ_BYTE();
+
+            Value receiver = POP();
+
+            // 此时运行时栈顶应该是实例对象，否则报错
+            ASSERT(VALUE_IS_OBJINSTANCE(receiver), "receiver should be instance!");
+
+            ObjInstance *objInstance = VALUE_TO_OBJINSTANCE(receiver);
+
+            // 属性索引 应该小于 该实例对象所属的类的实例属性个数，否则报错
+            ASSERT(fieldIndex < objInstance->objHeader.class->fieldNum, "out of bounds field!");
+
+            // 将次栈顶的值保存为实例对象的属性值
+            objInstance->fields[fieldIndex] = PEEK();
+            goto loopStart;
+
         default:
             break;
     }
