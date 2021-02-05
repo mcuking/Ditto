@@ -341,7 +341,7 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread) {
     vm->curThread = curThread;  // 当前正在执行的线程
     register Frame *curFrame;   // 当前帧栈 frame
     register Value *stackStart; // 当前帧栈 frame 对应的运行时栈的起始地址（栈底）
-    register uint8_t *ip;       //  程序计数器，用于存储即将执行的下一条指令在指令流中的地址
+    register uint8_t *ip;       // 程序计数器，用于存储即将执行的下一条指令在指令流中的地址
     register ObjFn *fn;         // 当前运行的函数对应的指令流
     OpCode opCode;              // 代执行指令的操作码
 
@@ -676,6 +676,76 @@ loopStart:
 
             // 将次栈顶的值保存为实例对象的属性值
             objInstance->fields[fieldIndex] = PEEK();
+            goto loopStart;
+
+        case OPCODE_JUMP:
+            //【指向即将执行的下一条指令的程序计数器 ip 向前跳，偏移量为 offset】
+            // 操作数为偏移量 offset，占 2 个字节
+            int16_t offset = READ_SHORT();
+            // 偏移量必须为正数
+            ASSERT(offset > 0, "OPCODE_JUMP's operand must be positive!");
+            ip += offset;
+            goto loopStart;
+
+        case OPCODE_LOOP:
+            //【程序计数器 ip 向回跳，偏移量为 offset】
+            // 操作数为偏移量 offset，占 2 个字节
+            int16_t offset = READ_SHORT();
+            // 偏移量必须为正数
+            ASSERT(offset > 0, "OPCODE_LOOP's operand must be positive!");
+            ip -= offset;
+            goto loopStart;
+
+        case OPCODE_JUMP_IF_FALSE:
+            //【如果栈顶的值（即条件）为 false，则程序计数器 ip 向前跳，偏移量为 offset】
+            // 操作数为偏移量 offset，占 2 个字节
+            int16_t offset = READ_SHORT();
+            // 偏移量必须为正数
+            ASSERT(offset > 0, "OPCODE_JUMP_IF_FALSE's operand must be positive!");
+
+            Value condition = POP();
+
+            if (VALUE_IS_FALSE(condition) || VALUE_IS_NULL(condition)) {
+                ip += offset;
+            }
+            goto loopStart;
+
+        case OPCODE_AND:
+            //【如果栈顶的值（即条件）为 false，则程序计数器 ip 向前跳，偏移量为 offset，否则不跳】
+            // 主要针对逻辑与运算，即 A && B，如果 A 为 true，则执行 B，否则就跳过 B，执行后面的代码
+            // 操作数为偏移量 offset，占 2 个字节
+            int16_t offset = READ_SHORT();
+            // 偏移量必须为正数
+            ASSERT(offset > 0, "OPCODE_AND's operand must be positive!");
+
+            Value condition = PEEK();
+
+            if (VALUE_IS_FALSE(condition) || VALUE_IS_NULL(condition)) {
+                // 如果 condition 为 false，则不再计算 and 的右操作数，即跳过 and 的右操作数对应的指令流
+                ip += offset;
+            } else {
+                // 否则仍需计算 and 的右操作数，丢弃栈顶的条件即可
+                DROP();
+            }
+            goto loopStart;
+
+        case OPCODE_OR:
+            //【如果栈顶的值（即条件）为 true，则程序计数器 ip 向前跳，偏移量为 offset，否则不跳】
+            // 主要针对逻辑与运算，即 A || B，如果 A 为 false，则执行 B，否则就跳过 B，执行后面的代码
+            // 操作数为偏移量 offset，占 2 个字节
+            int16_t offset = READ_SHORT();
+            // 偏移量必须为正数
+            ASSERT(offset > 0, "OPCODE_OR's operand must be positive!");
+
+            Value condition = PEEK();
+
+            if (VALUE_IS_FALSE(condition) || VALUE_IS_NULL(condition)) {
+                // 如果 condition 为 false，则仍需计算 or 的右操作数，丢弃栈顶的条件即可
+                DROP();
+            } else {
+                // 否则不再计算 or 的右操作数，即跳过 or 的右操作数对应的指令流
+                ip += offset;
+            }
             goto loopStart;
 
         default:
