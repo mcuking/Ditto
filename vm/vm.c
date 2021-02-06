@@ -772,6 +772,53 @@ loopStart:
             stackStart[0] = OBJ_TO_VALUE(objInstance);
             goto loopStart;
 
+        case OPCODE_RETURN:
+            //【结束函数的运行，并将栈顶的值作为返回值】
+            // 通过 POP 从栈顶获取函数的执行结果，并作为返回值
+            Value retVal = POP();
+
+            // usedFrameNum 自减 1，结束该函数对应的帧栈 frame
+            curThread->usedFrameNum--;
+
+            // 关闭该函数对应的运行时栈中的自由变量 upvalue（即被内层函数引用的局部变量）（关闭自由变量具体和作用请看上面 CLOSE_UPVALUE 操作码的注释）
+            closedUpvalue(curThread, stackStart);
+
+            // 如果 usedFrameNum 减 1 后为 0，说明该线程 不再执行函数 或者 所有的函数调用都返回了，直接结束该线程即可
+            if (curThread->usedFrameNum == 0) {
+                // 如果 caller 为空，则说明该线程不是由另一个线程调用的，直接结束
+                if (curThread->caller == NULL) {
+                    // 将返回值 retVal 放在 “大栈” 栈底 stack[0]
+                    curThread->stack[0] = retVal;
+                    // 然后将 “大栈” 的 esp 设置成 “大栈” 栈底加 1（注：esp 指针指向的是栈中下一个可写入数据的 slot，即栈顶的后一个 slot）
+                    // 即回收除了栈底 stack[0] 之外的其余 “大栈” 空间
+                    curThread->esp = curThread->stack + 1;
+                    // 宣告虚拟机成功执行结束
+                    return VM_RESULT_SUCESS;
+                }
+
+                // 如果 caller 不为空，则说明该线程是由另一个线程调用的，就将控制权交给调用方
+                //（调用一个线程时候，会在被调用线程的 caller 记录主调用方线程）
+                // 获取主调用方线程
+                ObjThread *callerThread = curThread->caller;
+                // 将当前线程变量改为主调用方线程
+                curThread = callerThread;
+                vm->curThread = callerThread;
+
+                // 将被调用方线程的返回值保存到主调用方线程的栈顶
+                // （注：esp 指针指向的是栈中下一个可写入数据的 slot，即栈顶的后一个 slot）
+                curThread->esp[-1] = retVal;
+            } else {
+                // 如果 usedFrameNum 减 1 后不为 0，说明该线程中的函数调用链尚未返回到最上层函数
+                // 需要将本函数的返回值（从函数运行时栈顶获取的值）放在函数运行时栈底 stackStart[0]
+                // 这样调用方才能在它的运行时栈顶获取到该函数的返回值（调用方和被调用方的运行时栈是接壤的，被调用方的运行时栈在调用方的运行时栈之上）
+                stackStart[0] = retVal;
+                // 然后将 “大栈” 的 esp 设置成函数运行时栈底 stackStart[0] 的后一个 slot（注：esp 指针指向的是栈中下一个可写入数据的 slot，即栈顶的后一个 slot）
+                // 也就是将除了函数返回值所在的 slot--stackStart[0] 之外，该函数的所有的 slot 均回收掉（包括函数的参数）
+                curThread->esp = stackStart + 1;
+            }
+            LOAD_CUR_FRAME();
+            goto loopStart;
+
         default:
             break;
     }
