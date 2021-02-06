@@ -349,7 +349,7 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread) {
 // esp 指针指向的是栈中下一个可写入数据的 slot，即栈顶的后一个 slot
 #define PUSH(value) (*curThread->esp++ = value) // 压入栈顶
 #define POP() (*(--curThread->esp))             // 弹出栈顶，并获得栈顶的数据
-#define DROP() (curThread->esp--)               // 丢弃栈顶
+#define DROP() (curThread->esp--)               // 丢弃栈顶，即回收栈顶空间
 #define PEEK() (*(curThread->esp - 1))          // 获得栈顶数据（不改变栈顶指针 esp）
 #define PEEK2() (*(curThread->esp - 2))         // 获得次栈顶数据（不改变栈顶指针 esp）
 
@@ -840,6 +840,27 @@ loopStart:
             // 因此时并没有实际应用运行时栈（例如在栈中分配局部变量的空间或压入函数的参数）
             // 所以此时的栈底就是栈顶，也就是说栈底 stackStart[0] 就是之前保存子类名的次栈顶空间
             stackStart[0] = OBJ_TO_VALUE(class);
+            goto loopStart;
+
+        case OPCODE_INSTANCE_METHOD:
+        case OPCODE_STATIC_METHOD:
+            //【将实例方法/静态方法绑定到指定类上】
+            // 操作数为待绑定的方法名在 vm->allMethodNames 数组中的索引
+            // 栈顶的值为待绑定的类，次栈顶的值为待绑定的方法体
+
+            // 待绑定的方法名在 vm->allMethodNames 数组中的索引
+            uint32_t methodNameIndex = READ_SHORT();
+            // 待绑定的类
+            Class *class = VALUE_TO_CLASS(PEEK());
+            // 待绑定的方法体（是执行 CREATE_CLOSURE 对应指令后，生成方法体并压入到栈中）
+            Value method = PEEK2();
+
+            // 将实例方法/静态方法绑定到指定类上
+            bindMethodAndPath(vm, opCode, class, methodNameIndex, method);
+
+            // 回收栈顶和次栈顶的空间
+            DROP();
+            DROP();
             goto loopStart;
 
         default:
