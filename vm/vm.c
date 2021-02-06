@@ -760,6 +760,18 @@ loopStart:
             DROP();
             goto loopStart;
 
+        case OPCODE_CONSTRUCT:
+            //【基于栈底的类创建实例对象，并存储到栈底】
+            // 执行该指令时，栈底 stackStart[0] 应该是一个类（执行该指令之前，先执行 CREATE_CLASS 创建类并存储到栈底 stackStart[0]）
+            ASSERT(VALUE_IS_CLASS(stackStart[0]), "stackStart[0] should be a class for OPCODE_CONSTRUCT!");
+
+            // 基于该类创建实例对象
+            ObjInstance *objInstance = newObjInstance(vm, VALUE_TO_CLASS(stackStart[0]));
+
+            // 将创建的实例对象存储到栈底 stackStart[0]
+            stackStart[0] = OBJ_TO_VALUE(objInstance);
+            goto loopStart;
+
         default:
             break;
     }
