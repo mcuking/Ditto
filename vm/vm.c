@@ -131,7 +131,7 @@ inline static void createFrame(VM *vm, ObjThread *objThread, ObjClosure *objClos
 static void closedUpvalue(ObjThread *objThread, Value *lastSlot) {
     ObjUpvalue *upvalue = objThread->openUpvalues;
     // 注意：在自由变量 upvalue 链表创建的时候，就保证了是按照 upvalue->localVarPtr 的值降序排序的，首节点的自由变量的 localVarPtr 最大
-    while (upvalue != NULL && upvalue >= lastSlot) {
+    while (upvalue != NULL && upvalue->localVarPtr >= lastSlot) {
         // 将指针 upvalue->localVarPtr 指向的运行时栈中的局部变量的值，保存到 upvalue->closedUpvalue 变量中
         upvalue->closedUpvalue = *(upvalue->localVarPtr);
         // 将指针 upvalue->localVarPtr 改为指向 upvalue->closedUpvalue
@@ -746,6 +746,18 @@ loopStart:
                 // 否则不再计算 or 的右操作数，即跳过 or 的右操作数对应的指令流
                 ip += offset;
             }
+            goto loopStart;
+
+        case OPCODE_CLOSE_UPVALUE:
+            // 【将自由变量中满足 **指向的局部变量在栈中的地址** 大于 **当前栈顶地址** 的自由变量 关闭】
+            // 此时栈顶的值 *(curThread->esp - 1) 就是某个局部变量，对应有一个自由变量 upvalue 的 localVarPtr 指向这个局部变量
+            // 现在是将所有自由变量中 满足 指向的局部变量在运行时栈中的地址 大于 栈顶的这个局部变量的地址 的自由变量关闭
+            // 关闭是指在局部变量在运行时栈的空间被回收之前，将值保存到 upvalue->closedUpvalue 中，然后将 upvalue->localVarPtr 转而指向 upvalue->closedUpvalue
+            // 目的是为了在局部变量在运行时栈的空间被回收之后，仍可以从 upvalue->closedUpvalue 中访问到该局部变量的值
+            // 因为自由变量就是指那些被内层函数所引用的外层函数的局部变量，在外层函数执行完被回收之后，内层函数可能没有被回收，仍需要访问所引用的外层函数的局部变量
+            closedUpvalue(curThread, curThread->esp - 1);
+            // 将栈顶的局部变量丢弃
+            DROP();
             goto loopStart;
 
         default:
