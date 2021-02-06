@@ -819,6 +819,29 @@ loopStart:
             LOAD_CUR_FRAME();
             goto loopStart;
 
+        case OPCODE_CREATE_CLASS:
+            //【创建子类】
+            // 此时操作数为子类的实例属性个数，栈顶的值为基类（本次创建的类需要继承的类），次栈顶的值为子类名
+            uint32_t fieldNum = READ_BYTE();
+            Value superClass = PEEK();
+            Value className = PEEK2();
+
+            // 保存子类名的次栈顶空间暂时保留，后面创建类会直接用到该空间
+            // 回收保存基类的栈顶空间，此时上面的次栈顶就变成了栈顶
+            DROP();
+
+            // 创建子类之前，先校验基类的合法性
+            validateSuperClass(vm, className, fieldNum, superClass);
+
+            // 调用 newClass 创建子类
+            Class *class = newClass(vm, VALUE_TO_OBJSTR(className), fieldNum, VALUE_TO_CLASS(superClass));
+
+            // 将创建的子类存储到函数运行时栈底 stackStart[0]
+            // 因此时并没有实际应用运行时栈（例如在栈中分配局部变量的空间或压入函数的参数）
+            // 所以此时的栈底就是栈顶，也就是说栈底 stackStart[0] 就是之前保存子类名的次栈顶空间
+            stackStart[0] = OBJ_TO_VALUE(class);
+            goto loopStart;
+
         default:
             break;
     }
