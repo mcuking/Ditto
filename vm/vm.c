@@ -402,7 +402,7 @@ loopStart:
             PUSH(fn->constants.datas[READ_SHORT()]);
             goto loopStart;
 
-        case OPCODE_LOAD_THIS_FIELD:
+        case OPCODE_LOAD_THIS_FIELD: {
             //【将类的实例属性的值加载到栈顶】
             // 操作数是该属性在 objInstance->fields 数组中的索引，占 1 个字节
             uint8_t fieldIndex = READ_BYTE();
@@ -414,6 +414,7 @@ loopStart:
 
             PUSH(objInstance->fields[fieldIndex]);
             goto loopStart;
+        }
 
         case OPCODE_LOAD_LOCAL_VAR:
             //【将局部变量在运行时栈的值压入到运行时栈顶】
@@ -620,7 +621,7 @@ loopStart:
             fn->module->moduleVarValue.datas[READ_SHORT()] = PEEK();
             goto loopStart;
 
-        case OPCODE_STORE_THIS_FIELD:
+        case OPCODE_STORE_THIS_FIELD: {
             //【将运行时栈顶的值保存为 this 实例对象的属性值】
             // 操作数为该属性在实例对象 fields 数组中的索引，占 1 个字节
             // 此时运行时栈底（即第 0 个 slot）的值就是实例对象，属性值就是存储在实例对象的 fields 数组中
@@ -638,8 +639,9 @@ loopStart:
             // 从栈顶获取属性值后，写入到实例对象的 fields 数组中
             objInstance->fields[fieldIndex] = PEEK();
             goto loopStart;
+        }
 
-        case OPCODE_LOAD_FIELD:
+        case OPCODE_LOAD_FIELD: {
             //【将实例对象的属性值压入到运行时栈顶】
             // 操作数为该属性在实例对象 fields 数组中的索引，占 1 个字节
             // 此时运行时栈顶应该是实例对象（在执行该指令之前，会先执行压入实例对象到栈顶的指令）
@@ -657,8 +659,9 @@ loopStart:
 
             PUSH(objInstance->fields[fieldIndex]);
             goto loopStart;
+        }
 
-        case OPCODE_STORE_FIELD:
+        case OPCODE_STORE_FIELD: {
             //【将运行时栈顶的值保存为实例对象的属性值】
             // 操作数为该属性在实例对象 fields 数组中的索引，占 1 个字节
             // 此时运行时栈顶应该是实例对象，次栈顶为属性值
@@ -677,8 +680,9 @@ loopStart:
             // 将次栈顶的值保存为实例对象的属性值
             objInstance->fields[fieldIndex] = PEEK();
             goto loopStart;
+        }
 
-        case OPCODE_JUMP:
+        case OPCODE_JUMP: {
             //【指向即将执行的下一条指令的程序计数器 ip 向前跳，偏移量为 offset】
             // 操作数为偏移量 offset，占 2 个字节
             int16_t offset = READ_SHORT();
@@ -686,8 +690,9 @@ loopStart:
             ASSERT(offset > 0, "OPCODE_JUMP's operand must be positive!");
             ip += offset;
             goto loopStart;
+        }
 
-        case OPCODE_LOOP:
+        case OPCODE_LOOP: {
             //【程序计数器 ip 向回跳，偏移量为 offset】
             // 操作数为偏移量 offset，占 2 个字节
             int16_t offset = READ_SHORT();
@@ -695,8 +700,9 @@ loopStart:
             ASSERT(offset > 0, "OPCODE_LOOP's operand must be positive!");
             ip -= offset;
             goto loopStart;
+        }
 
-        case OPCODE_JUMP_IF_FALSE:
+        case OPCODE_JUMP_IF_FALSE: {
             //【如果栈顶的值（即条件）为 false，则程序计数器 ip 向前跳，偏移量为 offset】
             // 操作数为偏移量 offset，占 2 个字节
             int16_t offset = READ_SHORT();
@@ -709,8 +715,9 @@ loopStart:
                 ip += offset;
             }
             goto loopStart;
+        }
 
-        case OPCODE_AND:
+        case OPCODE_AND: {
             //【如果栈顶的值（即条件）为 false，则程序计数器 ip 向前跳，偏移量为 offset，否则不跳】
             // 主要针对逻辑与运算，即 A && B，如果 A 为 true，则执行 B，否则就跳过 B，执行后面的代码
             // 操作数为偏移量 offset，占 2 个字节
@@ -728,8 +735,9 @@ loopStart:
                 DROP();
             }
             goto loopStart;
+        }
 
-        case OPCODE_OR:
+        case OPCODE_OR: {
             //【如果栈顶的值（即条件）为 true，则程序计数器 ip 向前跳，偏移量为 offset，否则不跳】
             // 主要针对逻辑与运算，即 A || B，如果 A 为 false，则执行 B，否则就跳过 B，执行后面的代码
             // 操作数为偏移量 offset，占 2 个字节
@@ -747,6 +755,7 @@ loopStart:
                 ip += offset;
             }
             goto loopStart;
+        }
 
         case OPCODE_CLOSE_UPVALUE:
             // 【将自由变量中满足 **指向的局部变量在栈中的地址** 大于 **当前栈顶地址** 的自由变量 关闭】
@@ -760,7 +769,7 @@ loopStart:
             DROP();
             goto loopStart;
 
-        case OPCODE_CONSTRUCT:
+        case OPCODE_CONSTRUCT: {
             //【基于栈底的类创建实例对象，并存储到栈底】
             // 执行该指令时，栈底 stackStart[0] 应该是一个类（执行该指令之前，先执行 CREATE_CLASS 创建类并存储到栈底 stackStart[0]）
             ASSERT(VALUE_IS_CLASS(stackStart[0]), "stackStart[0] should be a class for OPCODE_CONSTRUCT!");
@@ -771,8 +780,9 @@ loopStart:
             // 将创建的实例对象存储到栈底 stackStart[0]
             stackStart[0] = OBJ_TO_VALUE(objInstance);
             goto loopStart;
+        }
 
-        case OPCODE_RETURN:
+        case OPCODE_RETURN: {
             //【结束函数的运行，并将栈顶的值作为返回值】
             // 通过 POP 从栈顶获取函数的执行结果，并作为返回值
             Value retVal = POP();
@@ -818,8 +828,9 @@ loopStart:
             }
             LOAD_CUR_FRAME();
             goto loopStart;
+        }
 
-        case OPCODE_CREATE_CLASS:
+        case OPCODE_CREATE_CLASS: {
             //【创建子类】
             // 此时操作数为子类的实例属性个数，栈顶的值为基类（本次创建的类需要继承的类），次栈顶的值为子类名
             uint32_t fieldNum = READ_BYTE();
@@ -841,9 +852,10 @@ loopStart:
             // 所以此时的栈底就是栈顶，也就是说栈底 stackStart[0] 就是之前保存子类名的次栈顶空间
             stackStart[0] = OBJ_TO_VALUE(class);
             goto loopStart;
+        }
 
         case OPCODE_INSTANCE_METHOD:
-        case OPCODE_STATIC_METHOD:
+        case OPCODE_STATIC_METHOD: {
             //【将实例方法/静态方法绑定到指定类上】
             // 操作数为待绑定的方法名在 vm->allMethodNames 数组中的索引
             // 栈顶的值为待绑定的类，次栈顶的值为待绑定的方法体
@@ -862,8 +874,9 @@ loopStart:
             DROP();
             DROP();
             goto loopStart;
+        }
 
-        case OPCODE_CREATE_CLOSURE:
+        case OPCODE_CREATE_CLOSURE: {
             //【创建函数闭包】
             // 操作数包含两部分：1. 待创建闭包的函数在常量表中的索引（占两个字节） 2. 函数所引用的自由变量数 *  {isEnclosingLocalVar, index}
             // 其中 isEnclosingLocalVar 表示 upvalue 是否是直接外层编译单元中的局部变量
@@ -908,11 +921,11 @@ loopStart:
             }
 
             goto loopStart;
+        }
 
         case OPCODE_END:
             NOT_REACHED();
     }
-
     NOT_REACHED();
 
 #undef PUSH
