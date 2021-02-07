@@ -652,7 +652,7 @@ static uint32_t discardLocalVar(CompileUnit *cu, int scopeDepth) {
 // 添加自由变量 upvalue
 // 添加 upvalue 到 cu->upvalues，并返回其索引值，若以存在则只返回索引即可
 // isEnclosingLocalVar 表示 upvalue 是否是直接外层编译单元中的局部变量
-// 如果是，则 index 表示的是此 upvalue 在直接外层编译单元的局部变量的索引
+// 如果是，则 index 表示的是此 upvalue 在直接外层编译单元的局部变量在该编译单元运行时栈的索引
 // 如果不是，则 index 表示的是此 upvalue 在直接外层编译单元的 upvalue 的索引
 // 也就是说内层函数可能引用的不是直接外层函数的局部变量，而是更外层函数的局部变量
 // 注：upvalue 是针对引用外层函数局部变量的内层函数的

@@ -863,6 +863,52 @@ loopStart:
             DROP();
             goto loopStart;
 
+        case OPCODE_CREATE_CLOSURE:
+            //【创建函数闭包】
+            // 操作数包含两部分：1. 待创建闭包的函数在常量表中的索引（占两个字节） 2. 函数所引用的自由变量数 *  {isEnclosingLocalVar, index}
+            // 其中 isEnclosingLocalVar 表示 upvalue 是否是直接外层编译单元中的局部变量
+            // 如果是，则 index 表示的是此 upvalue 在直接外层编译单元的局部变量在该编译单元运行时栈的索引
+            // 如果不是，则 index 表示的是此 upvalue 在直接外层编译单元的 upvalue 的索引
+
+            // 在执行该指令之前，待创建闭包的函数已经添加进了常量表（endCompileUnit 函数完成的），直接从常量表中取出该函数
+            ObjFn *objFn = VALUE_TO_OBJFN(fn->constants.datas[READ_SHORT()]);
+
+            // 基于该函数创建闭包
+            ObjClosure *objClosure = newObjClosure(vm, objFn);
+
+            // 将上面创建好的闭包压入到运行时栈顶
+            PUSH(OBJ_TO_VALUE(objClosure));
+
+            // 然后将该函数引用的自由变量添加到该函数闭包的 upvalues 数组中
+            uint32_t idx = 0;
+            while (idx < objFn->upvalueNum) {
+                idx++;
+
+                uint8_t isEnclosingLocalVar = READ_BYTE();
+                uint8_t index = READ_BYTE();
+
+                // isEnclosingLocalVar 表示 upvalue 是否是直接外层编译单元中的局部变量
+                // 如果是，则 index 表示的是此 upvalue 在直接外层编译单元的局部变量在该编译单元运行时栈的索引
+                // 如果不是，则 index 表示的是此 upvalue 在直接外层编译单元的 upvalue 的索引
+                if (isEnclosingLocalVar) {
+                    // 如果 isEnclosingLocalVar 为 true，则表示该函数引用的是直接外层函数的局部变量，index 值表示是该局部变量在直接外层函数中局部变量数组中的索引
+                    // 则需要先基于该局部变量创建自由变量，然后添加该自由变量到该函数闭包的 upvalues 数组中
+                    // 此时 index 表示该局部变量在直接外层函数的运行时栈中的索引，也就是现在正在执行的函数--直接外层函数
+                    // 所以 当前函数（即直接外层函数）的运行时栈底内存地址 + 索引 = 该局部变量内存地址，即 curFrame->stackStart + index
+                    objClosure->upvalues[idx] = createOpenUpvalue(vm, curThread, curFrame->stackStart + index);
+                } else {
+                    // 如果 isEnclosingLocalVar 为 false，则表示该函数引用的不是直接外层函数的局部变量，而是更外层函数中的局部变量，
+                    // 对于直接外层函数来说，该变量也是自由变量
+                    // 也就是说，无论内层函数引用的 upvalue 指向的是哪一个外层函数的局部变量，
+                    // 内层函数和该外层函数之间的所有中间层函数都会将该局部变量作为自己的自由变量 upvalue ，存储到中间层函数自己的 compileUnit->upvalues 数组中
+                    // 所以可以直接从直接外层函数的自由变量数组获取即可
+                    // 当前就是在执行直接外层函数，所以 curFrame->closure->upvalues 就是直接外层函数的自由变量数组
+                    objClosure->upvalues[idx] = curFrame->closure->upvalues[index];
+                }
+            }
+
+            goto loopStart;
+
         default:
             break;
     }
