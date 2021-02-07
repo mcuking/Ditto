@@ -909,7 +909,19 @@ loopStart:
 
             goto loopStart;
 
-        default:
-            break;
+        case OPCODE_END:
+            NOT_REACHED();
     }
+
+    NOT_REACHED();
+
+#undef PUSH
+#undef POP
+#undef DROP
+#undef PEEK
+#undef PEEK2
+#undef READ_BYTE
+#undef READ_SHORT
+#undef STORE_CUR_FRAME
+#undef LOAD_CUR_FRAME
 }
