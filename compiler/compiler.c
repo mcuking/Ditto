@@ -1352,7 +1352,7 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t len
         // 为什么变量的值会被设置成 VT_NULL 的 Value 形式，而不是代码中真正赋的值，例如 a = 1？
         // 1. 编译阶段：先将模块变量的值初始化为 VT_NULL，同时生成 a = 1 赋值的对应指令
         // 2. 运行时阶段：虚拟机执行赋值对应的指令，从而将 1 写到模块变量 a 对应的 objModule->moduleVarValue 值中
-        // 目前只是处在编译阶段，古可以通过判断 objModule->moduleVarValue 的值的类型来判断是否是先使用后声明的情况
+        // 目前只是处在编译阶段，故可以通过判断 objModule->moduleVarValue 的值的类型来判断是否是先使用后声明的情况
         objModule->moduleVarValue.datas[symbolIndex] = value;
     } else {
         // 已定义，则返回 -1（用于判断是否重复定义）
@@ -2747,11 +2747,27 @@ static void compileImport(CompileUnit *cu) {
 }
 
 // 编译程序
-// TODO: 等待后续完善
 static void compileProgram(CompileUnit *cu) {
+    if (matchToken(cu->curLexer, TOKEN_CLASS)) {
+        // 编译类定义
+        compileClassDefinition(cu);
+    } else if (matchToken(cu->curLexer, TOKEN_FUN)) {
+        // 编译函数定义
+        compileFunctionDefinition(cu);
+    } else if (matchToken(cu->curLexer, TOKEN_VAR)) {
+        // 编译变量定义
+        // 判断前面的 token 是否是 static，如果是，则该变量为类的静态属性
+        compileVarDefinition(cu, cu->curLexer->preToken.type == TOKEN_STATIC);
+    } else if (matchToken(cu, TOKEN_IMPORT)) {
+        // 编译模块导入
+        compileImport(cu);
+    } else {
+        // 编译语句（除了上面的情况之外的语句）
+        compileStatement(cu);
+    }
 }
 
-// 编译模块 objModule 的方法
+// 编译模块
 ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode) {
     // 每个模块（文件）都需要一个单独的词法分析器进行编译
     Lexer *lexer;
@@ -2772,7 +2788,7 @@ ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode) {
     CompileUnit moduleCU;
     initCompileUnit(lexer, &moduleCU, NULL, false);
 
-    //记录当前编译模块的变量数量，后面检查预定义模块变量时可减少遍历
+    //记录当前编译模块的变量数量，后面检查预定义模块变量时可减少遍历，也就是在下面编译之前，就已经在 moduleVarValue 中的变量，无需遍历检查是否声明过
     uint32_t moduleVarNumBefor = objModule->moduleVarValue.count;
 
     // 由于 initLexer 初始化函数中将 lexer 的 curToken 的 type 设置为 TOKEN_UNKNOWN
@@ -2786,5 +2802,43 @@ ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode) {
         compileProgram(&moduleCU);
     }
 
-    // TODO: 等待后续完善
+    // 模块编译完成后，生成 return null 对应的指令，以避免虚拟机执行下面 endCompileUnit 函数生成的 OPCODE_END 指令
+    // OPCODE_END 只是程序结束的标记，属于伪操作码，永远不应该被执行
+    writeOpCode(&moduleCU, OPCODE_PUSH_NULL);
+    writeOpCode(&moduleCU, OPCODE_RETURN);
+
+    // 背景：
+    // 模块变量相当于一个模块中的全局变量，支持使用变量在声明变量之前，
+    // 在从上到下的编译阶段中，遇到模块变量声明，会将其对应在 objModule->moduleVarValue 上的值设置成 VT_NULL 的 Value 形式
+    // 但当遇到使用的模块变量被使用了，但是目前为止没有看到该变量的声明，现将其对应在·objModule->moduleVarValue 上的值设置成行号，即 VT_NUM 的 Value 形式
+    // 直到继续向下编译，如果遇到该全局变量的声明，则就会进到这个判断分支，即变量对应在 objModule->moduleVarValue 的值为 VT_NUM 类型，
+    // 由此可以判断该变量已经在上面使用，但是没有声明，所以在这里将其设置成 VT_NULL 的 Value 形式
+    // 直到编译解阶段结束且虚拟机运行之前，检查 objModule->moduleVarValue 中是否还有值类型为 VT_NUM 的模块变量，如果有就会报错
+    // 误解：
+    // 为什么变量的值会被设置成 VT_NULL 的 Value 形式，而不是代码中真正赋的值，例如 a = 1？
+    // 1. 编译阶段：先将模块变量的值初始化为 VT_NULL，同时生成 a = 1 赋值的对应指令
+    // 2. 运行时阶段：虚拟机执行赋值对应的指令，从而将 1 写到模块变量 a 对应的 objModule->moduleVarValue 值中
+    // 目前只是处在编译阶段，故可以通过判断 objModule->moduleVarValue 的值的类型来判断是否是先使用后声明的情况
+
+    // 所以此处检测本次编译得到的 moduleVarValue 中的变量值是否还是存 VT_NUM 类型，也就是变量尚未声明的，如果有就直接报错
+    // 注：在本次编译之前，就已经在 moduleVarValue 中的变量，无需遍历检查是否声明过
+    uint32_t idx = moduleVarNumBefor;
+    while (idx < objModule->moduleVarValue.count) {
+        if (VALUE_IS_NULL(objModule->moduleVarValue.datas[idx])) {
+            char *str = objModule->moduleVarName.datas[idx].str;
+            uint32_t lineNo = VALUE_TO_NUM(objModule->moduleVarValue.datas[idx]);
+            COMPILE_ERROR(&lexer, "line:%d, variable \'%s\' not defined!", lineNo, str);
+        }
+        idx++;
+    }
+
+    // 模块编译完成后，置空当前编译单元
+    vm->curLexer->curCompileUnit = NULL;
+    vm->curLexer = vm->curLexer->parent;
+
+#if DEBUG
+    return endCompileUnit(&moduleCU, "(script)", 8);
+#else
+    return endCompileUnit(&moduleCU);
+#endif
 }
