@@ -231,8 +231,7 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode) {
 // 执行名为 moduleName 代码为 moduleCode 的模块
 VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode) {
     ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
-    return VM_RESULT_ERROR;
-    // TODO: 等待后续完善
+    return executeInstruction(vm, objThread);
 }
 
 // 编译核心模块
