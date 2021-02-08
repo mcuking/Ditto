@@ -52,4 +52,11 @@ void initVM(VM *vm);
 // 新建虚拟机
 VM *newVM(void);
 
+// 确保栈的容量及数据有效
+// needSlots 表示栈最少具有的容量，如果当前栈容量 stackCapacity 大于需要的栈数量，则直接返回即可
+void ensureStack(VM *vm, ObjThread *objThread, uint32_t needSlots);
+
+// 执行指令
+VMResult executeInstruction(VM *vm, register ObjThread *curThread);
+
 #endif
