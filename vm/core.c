@@ -60,6 +60,10 @@ char *rootDir = NULL;
         bindMethod(vm, classPtr, (uint32_t)globalIdx, method);                            \
     }
 
+/**
+ * Object 类的原生方法
+**/
+
 // !args[0]: object 取反，结果为 false
 static bool
     primObjectNot(VM *vm UNUSED, Value *args) {
@@ -114,6 +118,10 @@ static bool primObjectType(VM *vm, Value *args) {
     RET_OBJ(class);
 }
 
+/**
+ * Class 类的原生方法
+**/
+
 // args[0].name: 返回 args[0] 类的名字
 static bool primClassName(VM *vm UNUSED, Value *args) {
     Class *class = VALUE_TO_CLASS(args[0]);
@@ -135,6 +143,20 @@ static bool primClassSupertype(VM *vm UNUSED, Value *args) {
     RET_VALUE(VT_TO_VALUE(VT_NULL));
 }
 
+/**
+ * objectClass 的元信息类的原生方法
+**/
+
+// args[0].same(args[1], args[2]): 返回 args[1] 和 args[2] 是否相等
+static bool primObjectMetaSame(VM *vm UNUSED, Value *args) {
+    Value boolValue = BOOL_TO_VALUE(valueIsEqual(args[1], args[2]));
+    RET_VALUE(boolValue);
+}
+
+/**
+ * Bool 类的原生方法
+**/
+
 // args[0].toString: 返回 bool 的字符串形式
 static bool primBoolToString(VM *vm, Value *args) {
     ObjString *objString;
@@ -151,6 +173,10 @@ static bool primBoolNot(VM *vm UNUSED, Value *args) {
     bool value = !VALUE_TO_BOOL(args[0]);
     RET_BOOL(value);
 }
+
+/**
+ * Thread 类的原生方法
+**/
 
 // Thread.new(func): 创建一个 thread 实例
 // 该方法是脚本中调用 Thread.new(func) 所执行的原生方法
@@ -310,6 +336,10 @@ static bool primThreadIsDone(VM *vm UNUSED, Value *args) {
     RET_BOOL(objThread->usedFrameNum == 0 || !VALUE_IS_NULL(objThread->errorObj));
 }
 
+/**
+ * Fn 类的原生方法
+**/
+
 // 新建一个函数对象
 // 该方法是脚本中调用 Fn.new(_) 所执行的原生方法
 static bool primFnNew(VM *vm, Value *args) {
@@ -320,6 +350,10 @@ static bool primFnNew(VM *vm, Value *args) {
     // 直接返回函数闭包
     RET_VALUE(args[1]);
 }
+
+/**
+ * Null 类的原生方法
+**/
 
 // !null: null 取非得到 true
 // 该方法为 Null 类的实例方法
@@ -332,16 +366,6 @@ static bool primNullNot(VM *vm UNUSED, Value *args UNUSED) {
 static bool primNullToString(VM *vm, Value *args UNUSED) {
     ObjString *objString = newObjString(vm, "null", 4);
     RET_OBJ(objString);
-}
-
-/**
- * 定义objectClass 的元信息类的原生方法（提供脚本语言调用）
-**/
-
-// args[0].same(args[1], args[2]): 返回 args[1] 和 args[2] 是否相等
-static bool primObjectMetaSame(VM *vm UNUSED, Value *args) {
-    Value boolValue = BOOL_TO_VALUE(valueIsEqual(args[1], args[2]));
-    RET_VALUE(boolValue);
 }
 
 // 读取源码文件的方法
