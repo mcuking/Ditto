@@ -60,10 +60,6 @@ char *rootDir = NULL;
         bindMethod(vm, classPtr, (uint32_t)globalIdx, method);                            \
     }
 
-/**
- * 定义对象的原生方法（提供脚本语言调用）
-**/
-
 // !args[0]: object 取反，结果为 false
 static bool
     primObjectNot(VM *vm UNUSED, Value *args) {
@@ -117,10 +113,6 @@ static bool primObjectType(VM *vm, Value *args) {
     Class *class = getClassOfObj(vm, args[0]);
     RET_OBJ(class);
 }
-
-/**
- * 定义类的原生方法（提供脚本语言调用）
-**/
 
 // args[0].name: 返回 args[0] 类的名字
 static bool primClassName(VM *vm UNUSED, Value *args) {
@@ -329,6 +321,19 @@ static bool primFnNew(VM *vm, Value *args) {
     RET_VALUE(args[1]);
 }
 
+// !null: null 取非得到 true
+// 该方法为 Null 类的实例方法
+static bool primNullNot(VM *vm UNUSED, Value *args UNUSED) {
+    RET_VALUE(BOOL_TO_VALUE(true));
+}
+
+// null.toString: null 字符串化
+// 该方法为 Null 类的实例方法
+static bool primNullToString(VM *vm, Value *args UNUSED) {
+    ObjString *objString = newObjString(vm, "null", 4);
+    RET_OBJ(objString);
+}
+
 /**
  * 定义objectClass 的元信息类的原生方法（提供脚本语言调用）
 **/
@@ -532,6 +537,11 @@ void buildCore(VM *vm) {
     bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
     bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
     bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
+
+    //绑定 Null 类的方法
+    vm->nullClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Null"));
+    PRIM_METHOD_BIND(vm->nullClass, "!", primNullNot);
+    PRIM_METHOD_BIND(vm->nullClass, "toString", primNullToString);
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
