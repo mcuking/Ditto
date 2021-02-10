@@ -4,6 +4,8 @@
 #include "core.script.inc"
 #include "utils.h"
 #include "vm.h"
+#include <errno.h>
+#include <math.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -23,12 +25,13 @@ char *rootDir = NULL;
         return true;     \
     } while (0);
 
+//将值转为 Value 格式后做为返回值
 #define RET_OBJ(objPtr) RET_VALUE(OBJ_TO_VALUE(objPtr))
 #define RET_BOOL(boolean) RET_VALUE(BOOL_TO_VALUE(boolean))
 #define RET_NUM(num) RET_VALUE(NUM_TO_VALUE(num))
-#define RET_NULL(num) RET_VALUE(VT_TO_VALUE(VT_NULL))
-#define RET_TRUE(num) RET_VALUE(VT_TO_VALUE(VT_TRUE))
-#define RET_FALSE(num) RET_VALUE(VT_TO_VALUE(VT_FALSE))
+#define RET_NULL RET_VALUE(VT_TO_VALUE(VT_NULL))
+#define RET_TRUE RET_VALUE(VT_TO_VALUE(VT_TRUE))
+#define RET_FALSE RET_VALUE(VT_TO_VALUE(VT_FALSE))
 
 // 设置线程报错
 // 返回 false 通知虚拟机当前线程已报错，该切换线程了
@@ -368,6 +371,209 @@ static bool primNullToString(VM *vm, Value *args UNUSED) {
     RET_OBJ(objString);
 }
 
+/**
+ * Num 类的原生方法
+**/
+
+// 将字符串转换为数字
+// 该方法是脚本中调用 Num.fromString(_) 所执行的原生方法，为类的方法
+static bool primNumFromString(VM *vm, Value *args) {
+    if (!validateString(vm, args[1])) {
+        return false;
+    }
+
+    ObjString *objString = VALUE_TO_OBJSTR(args[1]);
+
+    // 空字符串返回 RETURN_NULL
+    if (objString->value.length == 0) {
+        RET_NULL;
+    }
+
+    ASSERT(objString->value.start[objString->value.length] == '\0', "objString don`t teminate!");
+
+    errno = 0;
+    char *endPtr;
+
+    // 将字符串转换为 double 型, 它会自动跳过前面的空白
+    double num = strtod(objString->value.start, &endPtr);
+
+    // 以 endPtr 是否等于 start+length 来判断不能转换的字符之后是否全是空白
+    while (*endPtr != '\0' && isspace((unsigned char)*endPtr)) {
+        endPtr++;
+    }
+
+    if (errno == ERANGE) {
+        RUN_ERROR("string too large!");
+    }
+
+    // 如果字符串中不能转换的字符不全是空白，则字符串非法，返回 NULL
+    if (endPtr < objString->value.start + objString->value.length) {
+        RET_NULL;
+    }
+
+    // 至此，检查通过，返回正确结果
+    RET_NUM(num);
+}
+
+// 返回圆周率
+// 该方法是脚本中调用 Num.pi 所执行的原生方法，为类的方法
+static bool primNumPi(VM *vm UNUSED, Value *args UNUSED) {
+    RET_NUM(3.14159265358979323846);
+}
+
+// 定义 Num 相关中缀运算符的宏，共性如下：
+// 先校验数字的合法性，然后再用 args[0] 和 args[1] 做中追运算符表示的运算
+// 例如 1 + 2，args[0] 是 1，args[1] 是 2，中缀运算符 operator 是 +，那么表达式的计算公式即 args[0] operator args[1]
+#define PRIM_NUM_INFIX(name, operator, type)           \
+    static bool name(VM *vm, Value *args) {            \
+        if (!validateNum(vm, args[1])) {               \
+            return false;                              \
+        }                                              \
+        uint32_t leftOperand = VALUE_TO_NUM(args[0]);  \
+        uint32_t rightOperand = VALUE_TO_NUM(args[1]); \
+        RET_##type(leftOperand operator rightOperand); \
+    }
+
+PRIM_NUM_INFIX(primNumPlus, +, NUM);
+PRIM_NUM_INFIX(primNumMinus, -, NUM);
+PRIM_NUM_INFIX(primNumMul, *, NUM);
+PRIM_NUM_INFIX(primNumDiv, /, NUM);
+PRIM_NUM_INFIX(primNumGt, >, BOOL);
+PRIM_NUM_INFIX(primNumGe, >=, BOOL);
+PRIM_NUM_INFIX(primNumLt, <, BOOL);
+PRIM_NUM_INFIX(primNumLe, <=, BOOL);
+#undef PRIM_NUM_INFIX
+
+// 定义 Num 相关位操作的宏，原理和上面一样
+#define PRIM_NUM_BIT(name, operator)                   \
+    static bool name(VM *vm, Value *args) {            \
+        if (!validateNum(vm, args[1])) {               \
+            return false;                              \
+        }                                              \
+        uint32_t leftOperand = VALUE_TO_NUM(args[0]);  \
+        uint32_t rightOperand = VALUE_TO_NUM(args[1]); \
+        RET_NUM(leftOperand operator rightOperand);    \
+    }
+
+PRIM_NUM_BIT(primNumBitAnd, &);
+PRIM_NUM_BIT(primNumBitOr, |);
+PRIM_NUM_BIT(primNumBitShiftRight, >>);
+PRIM_NUM_BIT(primNumBitShiftLeft, <<);
+#undef PRIM_NUM_BIT
+
+// 使用数学库函数的宏
+#define PRIM_NUM_MATH_FN(name, mathFn)             \
+    static bool name(VM *vm UNUSED, Value *args) { \
+        RET_NUM(mathFn(VALUE_TO_NUM(args[0])));    \
+    }
+
+PRIM_NUM_MATH_FN(primNumAbs, fabs);
+PRIM_NUM_MATH_FN(primNumAcos, acos);
+PRIM_NUM_MATH_FN(primNumAsin, asin);
+PRIM_NUM_MATH_FN(primNumAtan, atan);
+PRIM_NUM_MATH_FN(primNumCeil, ceil);
+PRIM_NUM_MATH_FN(primNumCos, cos);
+PRIM_NUM_MATH_FN(primNumFloor, floor);
+PRIM_NUM_MATH_FN(primNumNegate, -);
+PRIM_NUM_MATH_FN(primNumSin, sin);
+PRIM_NUM_MATH_FN(primNumSqrt, sqrt);
+PRIM_NUM_MATH_FN(primNumTan, tan);
+#undef PRIM_NUM_MATH_FN
+
+// 数字取模
+// 该方法是脚本中调用 num1%num2 所执行的原生方法，为实例方法
+static bool primNumMod(VM *vm UNUSED, Value *args) {
+    if (!validateNum(vm, args[1])) {
+        return false;
+    }
+    RET_NUM(fmod(VALUE_TO_NUM(args[0]), VALUE_TO_NUM(args[1])));
+}
+
+// 数字取反
+// 该方法是脚本中调用 ~num 所执行的原生方法，为实例方法
+static bool primNumBitNot(VM *vm UNUSED, Value *args) {
+    RET_NUM(~(uint32_t)VALUE_TO_NUM(args[0]));
+}
+
+// 数字获取范围
+// 该方法是脚本中调用[num1..num2] 所执行的原生方法，为实例方法
+static bool primNumRange(VM *vm UNUSED, Value *args) {
+    if (!validateNum(vm, args[1])) {
+        return false;
+    }
+
+    double from = VALUE_TO_NUM(args[0]);
+    double to = VALUE_TO_NUM(args[1]);
+    RET_OBJ(newObjRange(vm, from, to));
+}
+
+// 取数字的整数部分
+// 该方法是脚本中调用 num.truncate 所执行的原生方法，为实例方法
+static bool primNumTruncate(VM *vm UNUSED, Value *args) {
+    double integer;
+    modf(VALUE_TO_NUM(args[0]), &integer);
+    RET_NUM(integer);
+}
+
+// 返回小数部分
+// 该方法是脚本中调用 num.fraction 所执行的原生方法，为实例方法
+static bool primNumFraction(VM *vm UNUSED, Value *args) {
+    double dummyInteger;
+    RET_NUM(modf(VALUE_TO_NUM(args[0]), &dummyInteger));
+}
+
+// 判断数字是否无穷大，不区分正负无穷大
+// 该方法是脚本中调用 num.isInfinity 所执行的原生方法，为实例方法
+static bool primNumIsInfinity(VM *vm UNUSED, Value *args) {
+    RET_BOOL(isinf(VALUE_TO_NUM(args[0])));
+}
+
+// 判断是否为整数
+// 该方法是脚本中调用 num.isInteger 所执行的原生方法，为实例方法
+static bool primNumIsInteger(VM *vm UNUSED, Value *args) {
+    double num = VALUE_TO_NUM(args[0]);
+    // 如果是 NaN (不是一个数字)或无限大的数字就返回 false
+    if (isnan(num) || isinf(num)) {
+        RET_FALSE;
+    }
+    RET_BOOL(trunc(num) == num);
+}
+
+// 判断数字是否为 NaN
+// 该方法是脚本中调用 num.isNan 所执行的原生方法，为实例方法
+static bool primNumIsNan(VM *vm UNUSED, Value *args) {
+    RET_BOOL(isnan(VALUE_TO_NUM(args[0])));
+}
+
+// 数字转换为字符串
+// 该方法是脚本中调用 num.toString 所执行的原生方法，为实例方法
+static bool primNumToString(VM *vm UNUSED, Value *args) {
+    RET_OBJ(num2str(vm, VALUE_TO_NUM(args[0])));
+}
+
+// 判断两个数字是否相等
+// 该方法是脚本中调用 num1 == num2 所执行的原生方法，为实例方法
+static bool primNumEqual(VM *vm UNUSED, Value *args) {
+    if (!validateNum(vm, args[1])) {
+        RET_FALSE;
+    }
+
+    RET_BOOL(VALUE_TO_NUM(args[0]) == VALUE_TO_NUM(args[1]));
+}
+
+// 判断两个数字是否不等
+// 该方法是脚本中调用 num1 != num2 所执行的原生方法，为实例方法
+static bool primNumNotEqual(VM *vm UNUSED, Value *args) {
+    if (!validateNum(vm, args[1])) {
+        RET_TRUE;
+    }
+    RET_BOOL(VALUE_TO_NUM(args[0]) != VALUE_TO_NUM(args[1]));
+}
+
+/**
+ * 至此，原生方法定义部分结束
+**/
+
 // 读取源码文件的方法
 // path 为源码路径
 char *readFile(const char *path) {
@@ -398,6 +604,52 @@ char *readFile(const char *path) {
     return fileContent;
 }
 
+// 将数字转换为字符串
+static ObjString *num2str(VM *vm, double num) {
+    // NaN 不是一个确定的值,因此 NaN 和 NaN 是不相等的
+    if (num != num) {
+        return newObjString(vm, "NaN", 3);
+    }
+
+    if (num == INFINITY) {
+        return newObjString(vm, "infinity", 8);
+    }
+
+    if (num == -INFINITY) {
+        return newObjString(vm, "-infinity", 9);
+    }
+
+    // 以下 24 字节的缓冲区足以容纳双精度到字符串的转换
+    char buf[24] = {'\0'};
+    int len = sprintf(buf, "%.14g", num);
+    return newObjString(vm, buf, len);
+}
+
+// 判断 arg 是否为字符串
+static bool validateString(VM *vm, Value arg) {
+    if (VALUE_IS_OBJSTR(arg)) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "argument must be string!");
+}
+
+// 检验 arg 是否为函数
+static bool validateFn(VM *vm, Value arg) {
+    if (VALUE_TO_OBJCLOSURE(arg)) {
+        return true;
+    }
+    vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "argument must be a function!", 28));
+    return false;
+}
+
+//判断 arg 是否为数字
+static bool validateNum(VM *vm, Value arg) {
+    if (VALUE_IS_NUM(arg)) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "argument must be number!");
+}
+
 // 从核心模块中获取名为 name 的类
 static Value getCoreClassValue(ObjModule *objModule, const char *name) {
     int index = getIndexFromSymbolTable(&objModule->moduleVarName, name, strlen(name));
@@ -407,15 +659,6 @@ static Value getCoreClassValue(ObjModule *objModule, const char *name) {
         RUN_ERROR("something wrong occur: missing core class \"%s\"!", id);
     }
     return objModule->moduleVarValue.datas[index];
-}
-
-// 检验是否为函数
-static bool validateFn(VM *vm, Value arg) {
-    if (VALUE_TO_OBJCLOSURE(arg)) {
-        return true;
-    }
-    vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "argument must be a function!", 28));
-    return false;
 }
 
 // 从 vm->allModules 中获取名为 moduleName 的模块
@@ -525,21 +768,21 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->boolClass, "toString", primBoolToString);
     PRIM_METHOD_BIND(vm->boolClass, "!", primBoolNot);
 
-    // Thread 类也是定义在 core.script.inc，将其挂载到 vm->threadClass，并绑定原生方法
+    // Thread 类定义在 core.script.inc，将其挂载到 vm->threadClass，并绑定原生方法
     vm->threadClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Thread"));
-    //以下是 Thread 类方法
+    // 以下是 Thread 类方法
     PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "new(_)", primThreadNew);
     PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "abort(_)", primThreadAbort);
     PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "current", primThreadCurrent);
     PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "suspend()", primThreadSuspend);
     PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "yield(_)", primThreadYieldWithArg);
     PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "yield()", primThreadYieldWithoutArg);
-    //以下是 Thread 实例方法
+    // 以下是 Thread 实例方法
     PRIM_METHOD_BIND(vm->threadClass, "call()", primThreadCallWithoutArg);
     PRIM_METHOD_BIND(vm->threadClass, "call(_)", primThreadCallWithArg);
     PRIM_METHOD_BIND(vm->threadClass, "isDone", primThreadIsDone);
 
-    // 绑定函数类
+    // Fn 类定义在 core.script.inc，将其挂载到 vm->fnClass，并绑定原生方法
     vm->fnClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Fn"));
     PRIM_METHOD_BIND(vm->fnClass->objHeader.class, "new(_)", primFnNew);
 
@@ -562,10 +805,51 @@ void buildCore(VM *vm) {
     bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
     bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
 
-    //绑定 Null 类的方法
+    // Null 类定义在 core.script.inc，将其挂载到 vm->nullClass，并绑定原生方法
     vm->nullClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Null"));
     PRIM_METHOD_BIND(vm->nullClass, "!", primNullNot);
     PRIM_METHOD_BIND(vm->nullClass, "toString", primNullToString);
+
+    // Num 类定义在 core.script.inc，将其挂载到 vm->numClass，并绑定原生方法
+    vm->numClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Num"));
+    // 以下是 Num 类方法
+    PRIM_METHOD_BIND(vm->numClass->objHeader.class, "fromString(_)", primNumFromString);
+    PRIM_METHOD_BIND(vm->numClass->objHeader.class, "pi", primNumPi);
+    // 以下是 Num 实例方法
+    PRIM_METHOD_BIND(vm->numClass, "+(_)", primNumPlus);
+    PRIM_METHOD_BIND(vm->numClass, "-(_)", primNumMinus);
+    PRIM_METHOD_BIND(vm->numClass, "*(_)", primNumMul);
+    PRIM_METHOD_BIND(vm->numClass, "/(_)", primNumDiv);
+    PRIM_METHOD_BIND(vm->numClass, ">(_)", primNumGt);
+    PRIM_METHOD_BIND(vm->numClass, ">=(_)", primNumGe);
+    PRIM_METHOD_BIND(vm->numClass, "<(_)", primNumLt);
+    PRIM_METHOD_BIND(vm->numClass, "<=(_)", primNumLe);
+    PRIM_METHOD_BIND(vm->numClass, "&(_)", primNumBitAnd);
+    PRIM_METHOD_BIND(vm->numClass, "|(_)", primNumBitOr);
+    PRIM_METHOD_BIND(vm->numClass, ">>(_)", primNumBitShiftRight);
+    PRIM_METHOD_BIND(vm->numClass, "<<(_)", primNumBitShiftLeft);
+    PRIM_METHOD_BIND(vm->numClass, "abs", primNumAbs);
+    PRIM_METHOD_BIND(vm->numClass, "acos", primNumAcos);
+    PRIM_METHOD_BIND(vm->numClass, "asin", primNumAsin);
+    PRIM_METHOD_BIND(vm->numClass, "atan", primNumAtan);
+    PRIM_METHOD_BIND(vm->numClass, "ceil", primNumCeil);
+    PRIM_METHOD_BIND(vm->numClass, "cos", primNumCos);
+    PRIM_METHOD_BIND(vm->numClass, "floor", primNumFloor);
+    PRIM_METHOD_BIND(vm->numClass, "-", primNumNegate);
+    PRIM_METHOD_BIND(vm->numClass, "sin", primNumSin);
+    PRIM_METHOD_BIND(vm->numClass, "sqrt", primNumSqrt);
+    PRIM_METHOD_BIND(vm->numClass, "tan", primNumTan);
+    PRIM_METHOD_BIND(vm->numClass, "%(_)", primNumMod);
+    PRIM_METHOD_BIND(vm->numClass, "~", primNumBitNot);
+    PRIM_METHOD_BIND(vm->numClass, "..(_)", primNumRange);
+    PRIM_METHOD_BIND(vm->numClass, "truncate", primNumTruncate);
+    PRIM_METHOD_BIND(vm->numClass, "fraction", primNumFraction);
+    PRIM_METHOD_BIND(vm->numClass, "isInfinity", primNumIsInfinity);
+    PRIM_METHOD_BIND(vm->numClass, "isInteger", primNumIsInteger);
+    PRIM_METHOD_BIND(vm->numClass, "isNan", primNumIsNan);
+    PRIM_METHOD_BIND(vm->numClass, "toString", primNumToString);
+    PRIM_METHOD_BIND(vm->numClass, "==(_)", primNumEqual);
+    PRIM_METHOD_BIND(vm->numClass, "!=(_)", primNumNotEqual);
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
