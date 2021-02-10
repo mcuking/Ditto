@@ -2,12 +2,14 @@
 #include "class.h"
 #include "compiler.h"
 #include "core.script.inc"
+#include "unicodeUtf8.h"
 #include "utils.h"
 #include "vm.h"
 #include <errno.h>
 #include <math.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 // 源码文件所在的根目录，其值是在 cli.c 文件中设置的
 // 解释器运行时会获得源码文件所在路径并写入 rootDir
@@ -481,7 +483,7 @@ PRIM_NUM_MATH_FN(primNumTan, tan);
 #undef PRIM_NUM_MATH_FN
 
 // 数字取模
-// 该方法是脚本中调用 num1%num2 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num1%num2 所执行的原生方法，该方法为实例方法
 static bool primNumMod(VM *vm UNUSED, Value *args) {
     if (!validateNum(vm, args[1])) {
         return false;
@@ -490,13 +492,13 @@ static bool primNumMod(VM *vm UNUSED, Value *args) {
 }
 
 // 数字取反
-// 该方法是脚本中调用 ~num 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 ~num 所执行的原生方法，该方法为实例方法
 static bool primNumBitNot(VM *vm UNUSED, Value *args) {
     RET_NUM(~(uint32_t)VALUE_TO_NUM(args[0]));
 }
 
 // 数字获取范围
-// 该方法是脚本中调用[num1..num2] 所执行的原生方法，为实例方法
+// 该方法是脚本中调用[num1..num2] 所执行的原生方法，该方法为实例方法
 static bool primNumRange(VM *vm UNUSED, Value *args) {
     if (!validateNum(vm, args[1])) {
         return false;
@@ -508,7 +510,7 @@ static bool primNumRange(VM *vm UNUSED, Value *args) {
 }
 
 // 取数字的整数部分
-// 该方法是脚本中调用 num.truncate 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num.truncate 所执行的原生方法，该方法为实例方法
 static bool primNumTruncate(VM *vm UNUSED, Value *args) {
     double integer;
     modf(VALUE_TO_NUM(args[0]), &integer);
@@ -516,20 +518,20 @@ static bool primNumTruncate(VM *vm UNUSED, Value *args) {
 }
 
 // 返回小数部分
-// 该方法是脚本中调用 num.fraction 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num.fraction 所执行的原生方法，该方法为实例方法
 static bool primNumFraction(VM *vm UNUSED, Value *args) {
     double dummyInteger;
     RET_NUM(modf(VALUE_TO_NUM(args[0]), &dummyInteger));
 }
 
 // 判断数字是否无穷大，不区分正负无穷大
-// 该方法是脚本中调用 num.isInfinity 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num.isInfinity 所执行的原生方法，该方法为实例方法
 static bool primNumIsInfinity(VM *vm UNUSED, Value *args) {
     RET_BOOL(isinf(VALUE_TO_NUM(args[0])));
 }
 
 // 判断是否为整数
-// 该方法是脚本中调用 num.isInteger 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num.isInteger 所执行的原生方法，该方法为实例方法
 static bool primNumIsInteger(VM *vm UNUSED, Value *args) {
     double num = VALUE_TO_NUM(args[0]);
     // 如果是 NaN (不是一个数字)或无限大的数字就返回 false
@@ -540,19 +542,19 @@ static bool primNumIsInteger(VM *vm UNUSED, Value *args) {
 }
 
 // 判断数字是否为 NaN
-// 该方法是脚本中调用 num.isNan 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num.isNan 所执行的原生方法，该方法为实例方法
 static bool primNumIsNan(VM *vm UNUSED, Value *args) {
     RET_BOOL(isnan(VALUE_TO_NUM(args[0])));
 }
 
 // 数字转换为字符串
-// 该方法是脚本中调用 num.toString 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num.toString 所执行的原生方法，该方法为实例方法
 static bool primNumToString(VM *vm UNUSED, Value *args) {
     RET_OBJ(num2str(vm, VALUE_TO_NUM(args[0])));
 }
 
 // 判断两个数字是否相等
-// 该方法是脚本中调用 num1 == num2 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num1 == num2 所执行的原生方法，该方法为实例方法
 static bool primNumEqual(VM *vm UNUSED, Value *args) {
     if (!validateNum(vm, args[1])) {
         RET_FALSE;
@@ -562,12 +564,230 @@ static bool primNumEqual(VM *vm UNUSED, Value *args) {
 }
 
 // 判断两个数字是否不等
-// 该方法是脚本中调用 num1 != num2 所执行的原生方法，为实例方法
+// 该方法是脚本中调用 num1 != num2 所执行的原生方法，该方法为实例方法
 static bool primNumNotEqual(VM *vm UNUSED, Value *args) {
     if (!validateNum(vm, args[1])) {
         RET_TRUE;
     }
     RET_BOOL(VALUE_TO_NUM(args[0]) != VALUE_TO_NUM(args[1]));
+}
+
+/**
+ * String 类的原生方法
+**/
+
+// 基于码点 args[1] 创建字符串
+// 该方法是脚本中调用 ObjString.fromCodePoint(args[1]) 所执行的原生方法，该方法为类方法
+static bool primStringFromCodePoint(VM *vm, Value *args) {
+    if (!validateInt(vm, args[1])) {
+        return false;
+    }
+
+    int codePoint = (int)VALUE_TO_NUM(args[1]);
+    if (codePoint < 0) {
+        SET_ERROR_FALSE(vm, "code point can`t be negetive!");
+    }
+
+    if (codePoint > 0x10ffff) {
+        SET_ERROR_FALSE(vm, "code point must be between 0 and 0x10ffff!");
+    }
+
+    RET_VALUE(makeStringFromCodePoint(vm, codePoint));
+}
+
+// 字符串相加
+// 该方法是脚本中调用 oargs[0] +args[1] 所执行的原生方法，该方法为实例方法
+static bool primStringPlus(VM *vm, Value *args) {
+    if (!validateString(vm, args[1])) {
+        return false;
+    }
+
+    ObjString *left = VALUE_TO_OBJSTR(args[0]);
+    ObjString *right = VALUE_TO_OBJSTR(args[1]);
+
+    // 结果字符串 result 长度为两个字符串长度之和
+    uint32_t totalLength = strlen(left->value.start) + strlen(right->value.start);
+
+    // +1 是为了结尾的 '\0'
+    // 为结果字符串 result 申请内存空间
+    ObjString *result = ALLOCATE_EXTRA(vm, ObjString, totalLength + 1);
+    if (result == NULL) {
+        MEM_ERROR("allocate memory failed in runtime!");
+    }
+
+    initObjHeader(vm, &result->objHeader, OT_STRING, vm->stringClass);
+    // 分别将 left->value 和 right->value 拷贝到 result->value 中
+    memcpy(result->value.start, left->value.start, strlen(left->value.start));
+    memcpy(result->value.start + strlen(left->value.start), right->value.start, strlen(right->value.start));
+    result->value.start[totalLength] = '\0';
+    result->value.length = totalLength;
+
+    // 根据字符串对象中的值 result->value 设置对应的哈希值给 result->hashCode
+    hashObjString(result);
+
+    RET_OBJ(result);
+}
+
+// 索引字符串
+// 通过数字或 objRange 对象作为索引，获取字符串中的部分字符串
+// 该方法是脚本中调用 objString[args[1]] 所执行的原生方法，其中 nargs[1]为数字或者 objRange 对象，该方法为实例方法
+static bool primStringSubscript(VM *vm, Value *args) {
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    // 索引可以是数字或 objRange 对象
+
+    // 1. 如果索引是数字，就直接索引 1 个字符
+    if (VALUE_IS_NUM(args[1])) {
+        // 先判断该数字是否是在 [0, objString->value.length) 区间
+        uint32_t index = validateIndex(vm, args[1], objString->value.length);
+        if (index == UINT32_MAX) {
+            return false;
+        }
+        // 若数字合法，则调用 stringCodePointAt 为该索引处的字符生成字符串对象并返回
+        RET_VALUE(stringCodePointAt(vm, objString, index));
+    }
+
+    // 2. 如果索引不是数字，必定为 objRange 对象，否则报错
+    if (!VALUE_IS_OBJRANGE(args[1])) {
+        SET_ERROR_FALSE(vm, "subscript should be integer or range!");
+    }
+
+    // direction是索引的方向，1 表示正方向，即索引值递增，-1表示反方向，即索引值递减
+    // from 若比 to大，即索引值递减，则为反方向，direction 为 1
+    int direction;
+    uint32_t count = objString->value.length;
+
+    // 返回的 startIndex 是 objRange.from 在 objString.value.start 中的下标
+    // calculateRange 主要是判断 objRange.from 和 objRange.to 是否在 [0, objString->value.length) 区间内，即索引范围是否合法
+    uint32_t startIndex = calculateRange(vm, VALUE_TO_OBJRANGE(args[1]), &count, &direction);
+    if (startIndex == UINT32_MAX) {
+        return false;
+    }
+    // 从字符串 sourceStr 中获取起始为 startIndex，方向为 direction 的 count 个字符，创建字符串并返回
+    RET_OBJ(newObjStringFromSub(vm, objString, startIndex, count, direction));
+}
+
+// 获取字符串中指定索引的字符对应的字节
+// 该方法是脚本中调用 objString.byteAt_(args[1]) 所执行的原生方法，其中 args[1]为索引，该方法为实例方法
+static bool primStringByteAt(VM *vm UNUSED, Value *args) {
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    // 先判断该索引 args[1] 是否是在 [0, objString->value.length) 区间
+    uint32_t index = validateIndex(vm, args[1], objString->value.length);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+    // 如果索引合法，则返回对应字符的数字形式
+    RET_NUM((uint8_t)objString->value.start[index]);
+}
+
+// 获取字符串对应的字节数
+// 该方法是脚本中调用 objString.byteCount_ 所执行的原生方法，该方法为实例方法
+static bool primStringByteCount(VM *vm UNUSED, Value *args) {
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    RET_NUM(objString->value.length);
+}
+
+// 获取字符串中指定索引的字符对应的码点
+// 该方法是脚本中调用 objString.codePointAt_(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primStringCodePointAt(VM *vm UNUSED, Value *args) {
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    // 先判断该索引 args[1] 是否是在 [0, objString->value.length) 区间
+    uint32_t index = validateIndex(vm, args[1], objString->value.length);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+
+    const uint8_t *bytes = (uint8_t *)objString->value.start;
+    if ((bytes[index] & 0xc0) == 0x80) {
+        // 如果 index 指向的并不是 UTF-8 编码的最高字节
+        // 而是后面的低字节,返回 -1 提示用户
+        RET_NUM(-1);
+    }
+
+    // 调用 decodeUtf8 解码对应字符并返回
+    RET_NUM(decodeUtf8((uint8_t *)objString->value.start + index, objString->value.length - index));
+}
+
+// 判断字符串 args[0] 中是否包含子字符串 args[1]
+// 该方法是脚本中调用 objString.contains(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primStringContains(VM *vm UNUSED, Value *args) {
+    // 先校验参数 args[1] 是否为字符串
+    if (!validateString(vm, args[1])) {
+        return false;
+    }
+
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    ObjString *pattern = VALUE_TO_OBJSTR(args[1]);
+
+    // 调用 findString 来判断字符串 args[0] 中是否包含子字符串 args[1]
+    RET_BOOL(findString(objString, pattern) != -1);
+}
+
+// 检索字符串 args[0] 中子串 args[1] 的起始下标
+// 该方法是脚本中调用 objString.indexOf(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primStringIndexOf(VM *vm UNUSED, Value *args) {
+    // 先校验参数 args[1] 是否为字符串
+    if (!validateString(vm, args[1])) {
+        return false;
+    }
+
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    ObjString *pattern = VALUE_TO_OBJSTR(args[1]);
+
+    // 若 pattern 比源串 objString 还长，源串 objString 必然不包括 pattern
+    if (pattern->value.length > objString->value.length) {
+        RET_FALSE;
+    }
+
+    // 否则调用 findString 来检索字符串 args[0] 中子串 args[1] 的起始下标
+    int index = findString(objString, pattern);
+    RET_NUM(index);
+}
+
+// 判断字符串 args[0] 是否以字符串 args[1] 为开始
+// 该方法是脚本中调用 objString.startsWith(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primStringStartsWith(VM *vm UNUSED, Value *args) {
+    // 先校验参数 args[1] 是否为字符串
+    if (!validateString(vm, args[1])) {
+        return false;
+    }
+
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    ObjString *pattern = VALUE_TO_OBJSTR(args[1]);
+
+    // 若 pattern 比源串 objString 还长，源串 objString 必然不包括 pattern
+    if (pattern->value.length > objString->value.length) {
+        RET_FALSE;
+    }
+
+    // 否则调用 memcmp 函数比较相同位置的字符串是否相同
+    RET_BOOL(memcmp(objString->value.start, pattern->value.start, pattern->value.length) == 0);
+}
+
+// 判断字符串 args[0] 是否以字符串 args[1] 为结束
+// 该方法是脚本中调用 objString.endsWith(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primStringEndsWith(VM *vm UNUSED, Value *args) {
+    // 先校验参数 args[1] 是否为字符串
+    if (!validateString(vm, args[1])) {
+        return false;
+    }
+
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    ObjString *pattern = VALUE_TO_OBJSTR(args[1]);
+
+    // 若 pattern 比源串 objString 还长，源串 objString 必然不包括 pattern
+    if (pattern->value.length > objString->value.length) {
+        RET_FALSE;
+    }
+
+    // 否则调用 memcmp 函数比较相同位置的字符串是否相同
+    char *cmpIdx = objString->value.start + objString->value.length - pattern->value.length;
+    RET_BOOL(memcmp(cmpIdx, pattern->value.start, pattern->value.length) == 0);
+}
+
+// 字符串输出自己
+// 该方法是脚本中调用 objString.toString() 所执行的原生方法，该方法为实例方法
+static bool primStringToString(VM *vm UNUSED, Value *args) {
+    RET_VALUE(args[0]);
 }
 
 /**
@@ -633,7 +853,7 @@ static bool validateString(VM *vm, Value arg) {
     SET_ERROR_FALSE(vm, "argument must be string!");
 }
 
-// 检验 arg 是否为函数
+// 判断 arg 是否为函数
 static bool validateFn(VM *vm, Value arg) {
     if (VALUE_TO_OBJCLOSURE(arg)) {
         return true;
@@ -648,6 +868,232 @@ static bool validateNum(VM *vm, Value arg) {
         return true;
     }
     SET_ERROR_FALSE(vm, "argument must be number!");
+}
+
+// 判断 value 是否为整数
+static bool validateIntValue(VM *vm, double value) {
+    if (trunc(value) == value) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "argument must be integer!");
+}
+
+// 判断 arg 是否为整数
+static bool validateInt(VM *vm, Value arg) {
+    // 首先得是数字
+    if (!validateNum(vm, arg)) {
+        return false;
+    }
+
+    // 再校验数值
+    return validateIntValue(vm, VALUE_TO_NUM(arg));
+}
+
+// 判断参数 index 是否是落在 [0, length) 之间的整数
+static uint32_t validateIndexValue(VM *vm, double index, uint32_t length) {
+    // 索引必须是整数，如果校验失败则返回 UINT32_MAX
+    // UINT32_MAX 是 32 为无符号数的最大值，即 5294967295，用十六进制表示就是 0xFFFFFFFF
+    if (!validateIntValue(vm, index)) {
+        return UINT32_MAX;
+    }
+
+    // 支持负数索引，负数是从后往前索引，转换其对应的正数索引
+    if (index < 0) {
+        index += length;
+    }
+
+    // 索引应该落在 [0, length)
+    if (index >= 0 && index < length) {
+        return (uint32_t)index;
+    }
+
+    // 执行到此说明超出范围
+    vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "index out of bound!", 19));
+    return UINT32_MAX;
+}
+
+// 校验 index 合法性
+static uint32_t validateIndex(VM *vm, Value index, uint32_t length) {
+    return validateIndexValue(vm, VALUE_TO_NUM(index), length);
+}
+
+// 校验 key 合法性
+static bool validateKey(VM *vm, Value arg) {
+    if (VALUE_IS_TRUE(arg) ||
+        VALUE_IS_FALSE(arg) ||
+        VALUE_IS_NULL(arg) ||
+        VALUE_IS_NUM(arg) ||
+        VALUE_IS_OBJSTR(arg) ||
+        VALUE_IS_OBJRANGE(arg) ||
+        VALUE_IS_CLASS(arg)) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "key must be value type!");
+}
+
+// 基于码点 value 创建字符串
+static Value makeStringFromCodePoint(VM *vm, int value) {
+    uint32_t byteNum = getByteNumOfEncodeUtf8(value);
+    ASSERT(byteNum != 0, "utf8 encode bytes should be between 1 and 4!");
+
+    // +1是为了结尾的 '\0'
+    ObjString *objString = ALLOCATE_EXTRA(vm, ObjString, byteNum + 1);
+
+    if (objString == NULL) {
+        MEM_ERROR("allocate memory failed in runtime!");
+    }
+
+    initObjHeader(vm, &objString->objHeader, OT_STRING, vm->stringClass);
+    objString->value.length = byteNum;
+    objString->value.start[byteNum] = '\0';
+    encodeUtf8((uint8_t *)objString->value.start, value);
+
+    // 根据字符串对象中的值 objString->value 设置对应的哈希值给 objString->hashCode
+    hashObjString(objString);
+
+    return OBJ_TO_VALUE(objString);
+}
+
+// 用索引 index 处的字符创建字符串对象
+static Value stringCodePointAt(VM *vm, ObjString *objString, uint32_t index) {
+    ASSERT(index < objString->value.length, "index out of bound!");
+    int codePoint = decodeUtf8((uint8_t *)objString->value.start + index, objString->value.length - index);
+
+    // 若不是有效的 utf8 序列，将其处理为单个裸字符
+    if (codePoint == -1) {
+        return OBJ_TO_VALUE(newObjString(vm, &objString->value.start[index], 1));
+    }
+
+    return makeStringFromCodePoint(vm, codePoint);
+}
+
+// 计算 objRange 中元素的起始索引及索引方向
+// countPtr 指针指向存储 objRange 所能索引的元素个数的变量
+// directionPtr 指针指向存储 objRange 索引方向的变量（-1 表示反向，索引递减；1 表示正向，索引递增）
+static uint32_t calculateRange(VM *vm, ObjRange *objRange, uint32_t *countPtr, int *directionPtr) {
+    uint32_t from = validateIndexValue(vm, objRange->from, *countPtr);
+    if (from == UINT32_MAX) {
+        return UINT32_MAX;
+    }
+
+    uint32_t to = validateIndexValue(vm, objRange->to, *countPtr);
+    if (to == UINT32_MAX) {
+        return UINT32_MAX;
+    }
+
+    //如果 from 和 to 为负值,经过 validateIndexValue 已经变成了相应的正索引
+    // -1 表示反向，索引递减；1 表示正向，索引递增
+    *directionPtr = from < to ? 1 : -1;
+    // countPtr 指针指向存储 objRange 所能索引的元素个数的变量
+    *countPtr = abs((int)(from - to)) + 1;
+    return from;
+}
+
+// 按照 UTF-8 编码【从 sourceStr 中起始为 startIndex，方向为 direction 的 count 个字符】
+static ObjString *newObjStringFromSub(VM *vm, ObjString *sourceStr, int startIndex, uint32_t count, int direction) {
+    uint8_t *source = (uint8_t *)sourceStr->value.start;
+    uint32_t totalLength = 0, idx = 0;
+
+    // 计算没有 UTF-8 编码的字符的 UTF-8 编码字节数，以便后面申请内存空间
+    while (idx < count) {
+        totalLength += getByteNumOfDecodeUtf8(source[startIndex + idx * direction]);
+        idx++;
+    }
+
+    // +1 是为了结尾的 '\0'
+    ObjString *result = ALLOCATE_EXTRA(vm, ObjString, totalLength + 1);
+
+    if (result == NULL) {
+        MEM_ERROR("allocate memory failed in runtime!");
+    }
+    initObjHeader(vm, &result->objHeader, OT_STRING, vm->stringClass);
+    result->value.start[totalLength] = '\0';
+    result->value.length = totalLength;
+
+    uint8_t *dest = (uint8_t *)result->value.start;
+    idx = 0;
+    while (idx < count) {
+        int index = startIndex + idx * direction;
+        // 先调用 decodeUtf8 获得字符的码点
+        int codePoint = decodeUtf8(source + index, sourceStr->value.length - index);
+        if (codePoint != -1) {
+            // 然后调用 encodeUtf8 将码点按照 UTF-8 编码，并写入dest 即 result
+            dest += encodeUtf8(dest, codePoint);
+        }
+        idx++;
+    }
+
+    // 根据字符串对象中的值 result->value 设置对应的哈希值给 result->hashCode
+    hashObjString(result);
+    return result;
+}
+
+// 使用 Boyer-Moore-Horspool 字符串匹配算法在 haystack 中查找 needle
+static int findString(ObjString *haystack, ObjString *needle) {
+    // 如果待查找的 patten 为空则为找到，直接返回 0 即可
+    if (needle->value.length == 0) {
+        //返回起始下标 0
+        return 0;
+    }
+
+    // 若待搜索的字符串比原串还长，肯定搜不到，直接返回 -1 即可
+    if (needle->value.length > haystack->value.length) {
+        return -1;
+    }
+
+    // 构建 “bad-character shift表” 以确定窗口滑动的距离
+    // 数组 shift 的值便是滑动距离
+    uint32_t shift[UINT8_MAX];
+    // needle 中最后一个字符的下标
+    uint32_t needleEnd = needle->value.length - 1;
+
+    // 一、先假定 “bad character” 不属于 needle(即 pattern)
+    // 对于这种情况，滑动窗口跨过整个 needle
+    uint32_t idx = 0;
+    while (idx < UINT8_MAX) {
+        // 默认为滑过整个 needle 的长度
+        shift[idx] = needle->value.length;
+        idx++;
+    }
+
+    // 二、假定 haystack 中与 needle 不匹配的字符在 needle 中之前已匹配过的位置出现过
+    // 就滑动窗口以使该字符与在needle中匹配该字符的最末位置对齐。
+    // 这里预先确定需要滑动的距离
+    idx = 0;
+    while (idx < needleEnd) {
+        char c = needle->value.start[idx];
+        // idx 从前往后遍历 needle，当 needle 中有重复的字符 c 时，
+        // 后面的字符 c 会覆盖前面的同名字符 c，这保证了数组 shilf 中字符是 needle 中最末位置的字符，
+        // 从而保证了 shilf[c] 的值是 needle中 最末端同名字符与 needle 末端的偏移量
+        shift[(uint8_t)c] = needleEnd - idx;
+        idx++;
+    }
+
+    // Boyer-Moore-Horspool 是从后往前比较，这是处理 bad-character 高效的地方，
+    // 因此获取 needle 中最后一个字符，用于同 haystack 的窗口中最后一个字符比较
+    char lastChar = needle->value.start[needleEnd];
+
+    // 长度差便是滑动窗口的滑动范围
+    uint32_t range = haystack->value.length - needle->value.length;
+
+    // 从 haystack 中扫描 needle，寻找第 1 个匹配的字符，如果遍历完了就停止
+    idx = 0;
+    while (idx <= range) {
+        // 拿 needle 中最后一个字符同 haystack 窗口的最后一个字符比较
+        //（因为Boyer-Moore-Horspool是从后往前比较），如果匹配，看整个 needle 是否匹配
+        char c = haystack->value.start[idx + needleEnd];
+        if (lastChar == c &&
+            memcmp(haystack->value.start + idx, needle->value.start, needleEnd) == 0) {
+            // 找到了就返回匹配的位置
+            return idx;
+        }
+
+        // 否则就向前滑动继续下一伦比较
+        idx += shift[(uint8_t)c];
+    }
+
+    // 未找到就返回 -1
+    return -1;
 }
 
 // 从核心模块中获取名为 name 的类
@@ -850,6 +1296,23 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->numClass, "toString", primNumToString);
     PRIM_METHOD_BIND(vm->numClass, "==(_)", primNumEqual);
     PRIM_METHOD_BIND(vm->numClass, "!=(_)", primNumNotEqual);
+
+    // String 类定义在 core.script.inc，将其挂载到 vm->stringClass，并绑定原生方法
+    vm->stringClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "String"));
+    // 以下是 String 类方法
+    PRIM_METHOD_BIND(vm->stringClass->objHeader.class, "fromCodePoint(_)", primStringFromCodePoint);
+    // 以下是 String 实例方法
+    PRIM_METHOD_BIND(vm->stringClass, "+(_)", primStringPlus);
+    PRIM_METHOD_BIND(vm->stringClass, "[_]", primStringSubscript);
+    PRIM_METHOD_BIND(vm->stringClass, "byteAt_(_)", primStringByteAt);
+    PRIM_METHOD_BIND(vm->stringClass, "byteCount_", primStringByteCount);
+    PRIM_METHOD_BIND(vm->stringClass, "codePointAt_(_)", primStringCodePointAt);
+    PRIM_METHOD_BIND(vm->stringClass, "contains(_)", primStringContains);
+    PRIM_METHOD_BIND(vm->stringClass, "indexOf(_)", primStringIndexOf);
+    PRIM_METHOD_BIND(vm->stringClass, "startsWith(_)", primStringStartsWith);
+    PRIM_METHOD_BIND(vm->stringClass, "endsWith(_)", primStringEndsWith);
+    PRIM_METHOD_BIND(vm->stringClass, "toString", primStringToString);
+    PRIM_METHOD_BIND(vm->stringClass, "count", primStringByteCount);
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1

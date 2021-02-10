@@ -17,8 +17,7 @@ uint32_t hashString(char *str, uint32_t length) {
 
 // 根据字符串对象中的值设置对应的哈希值
 void hashObjString(ObjString *objString) {
-    objString->hashCode =
-        hashString(objString->value.start, objString->value.length);
+    objString->hashCode = hashString(objString->value.start, objString->value.length);
 }
 
 // 新建字符串对象
