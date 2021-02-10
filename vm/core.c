@@ -318,6 +318,17 @@ static bool primThreadIsDone(VM *vm UNUSED, Value *args) {
     RET_BOOL(objThread->usedFrameNum == 0 || !VALUE_IS_NULL(objThread->errorObj));
 }
 
+// 新建一个函数对象
+// 该方法是脚本中调用 Fn.new(_) 所执行的原生方法
+static bool primFnNew(VM *vm, Value *args) {
+    // 代码块为参数必为闭包
+    if (!validateFn(vm, args[1]))
+        return false;
+
+    // 直接返回函数闭包
+    RET_VALUE(args[1]);
+}
+
 /**
  * 定义objectClass 的元信息类的原生方法（提供脚本语言调用）
 **/
@@ -498,6 +509,29 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->threadClass, "call()", primThreadCallWithoutArg);
     PRIM_METHOD_BIND(vm->threadClass, "call(_)", primThreadCallWithArg);
     PRIM_METHOD_BIND(vm->threadClass, "isDone", primThreadIsDone);
+
+    // 绑定函数类
+    vm->fnClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Fn"));
+    PRIM_METHOD_BIND(vm->fnClass->objHeader.class, "new(_)", primFnNew);
+
+    // 绑定 call 的重载方法
+    bindFnOverloadCall(vm, "call()");
+    bindFnOverloadCall(vm, "call(_)");
+    bindFnOverloadCall(vm, "call(_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
+    bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
@@ -579,4 +613,12 @@ void bindSuperClass(VM *vm, Class *subClass, Class *superClass) {
         bindMethod(vm, subClass, idx, superClass->methods.datas[idx]);
         idx++;
     }
+}
+
+//绑定 fn.call 的重载，同样一个函数的 call 方法支持 0～16 个参数
+static void bindFnOverloadCall(VM *vm, const char *sign) {
+    uint32_t index = ensureSymbolExist(vm, &vm->allMethodNames, sign, strlen(sign));
+    //构造 method
+    Method method = {MT_FN_CALL, {0}};
+    bindMethod(vm, vm->fnClass, index, method);
 }
