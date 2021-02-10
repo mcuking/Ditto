@@ -160,6 +160,164 @@ static bool primBoolNot(VM *vm UNUSED, Value *args) {
     RET_BOOL(value);
 }
 
+// Thread.new(func): 创建一个 thread 实例
+// 该方法是脚本中调用 Thread.new(func) 所执行的原生方法
+static bool primThreadNew(VM *vm, Value *args) {
+    // 参数必须为函数
+    if (!validateFn(vm, args[1])) {
+        return false;
+    }
+
+    ObjThread *objThread = newObjThread(vm, VALUE_TO_OBJCLOSURE(args[0]));
+
+    // 使stack[0]为接收者,保持栈平衡
+    objThread->stack[0] = VT_TO_VALUE(VT_NULL);
+    objThread->esp++;
+    RET_OBJ(objThread);
+}
+
+// Thread.abort(err): 以错误信息err为参数退出线程
+// 该方法是脚本中调用 Thread.abort(err) 所执行的原生方法，所以 args[1] 便是 err
+static bool primThreadAbort(VM *vm, Value *args) {
+    // 保存 err 到线程的 errorObj 上
+    vm->curThread->errorObj = args[1]; //
+    // 在原生方法返回后，虚拟机应该判断 err 即 args[1] 是否为空，如果非空说明原生方法出现异常，然后进行异常捕获（该逻辑暂未实现）
+    return VALUE_IS_NULL(args[1]);
+}
+
+// Thread.current: 返回当前的线程
+// 该方法是脚本中调用 Thread.current 所执行的原生方法
+static bool primThreadCurrent(VM *vm, Value *args UNUSED) {
+    RET_OBJ(vm->curThread);
+}
+
+// Thread.suspend(): 挂起线程，退出解释器
+// 该方法是脚本中调用 Thread.suspend() 所执行的原生方法
+static bool primThreadSuspend(VM *vm, Value *args UNUSED) {
+    // 将 curThread 设置为 NULL后，虚拟机监测到 curThread 为 NULL 是，表示当前没有可运行的线程，会退出解释器
+    vm->curThread = NULL;
+    return false;
+}
+
+// Thread.yield(arg): 带参数（args[1]）让出 CPU 使用权
+// 该方法是脚本中调用 Thread.yield(arg) 所执行的原生方法
+static bool primThreadYieldWithArg(VM *vm, Value *args) {
+    // 交回 CPU 控制权给调用当前线程的那个线程
+    ObjThread *curThread = vm->curThread;
+    vm->curThread = curThread->caller;
+    // 将当前线程的主调方设置为 NULL，断开与主调用的调用关系
+    curThread->caller = NULL;
+
+    // 若主调方不为空，即当前线程有主调方，
+    if (vm->curThread != NULL) {
+        // 如果当前线程有主调方，就将当前线程的返回值放在主调方的栈顶，使得主调方可以获得当前线程 yield 时的参数
+        vm->curThread->esp[-1] = args[1];
+
+        // 对于脚本来说，当前方法调用 Thread.yield(arg) 拥有两个参数，即 Thread 和 arg，那么这两个参数占用了栈中两个 slot，
+        // 由于存储主调方的参数只需要一个 slot，所以丢弃栈顶空间，预留之前的次栈顶空间
+        // 即丢弃 Thread.yield(arg) 中的 arg，也就是 args[1]，只保留 args[0] 用于存储主调用方线程通过 call 方法传递的参数
+        // 即保留 thread 参数所在的空间,将来唤醒时用于存储 yield 结果
+        curThread->esp--;
+    }
+    // 返回 false 给虚拟机，表示需要切换线程
+    // 虚拟机会从 vm->curThread 中获取当前运行的线程，在函数开头已经将 vm->curThread 设置成当前线程的主调方
+    // 如果 vm->curThread 为 NULL，虚拟机就认为全部线程执行完毕，可以退出了
+    return false;
+}
+
+// Thread.yield(): 无参数让出 CPU 使用权
+static bool primThreadYieldWithoutArg(VM *vm, Value *args UNUSED) {
+    // 交回 CPU 控制权给调用当前线程的那个线程
+    ObjThread *curThread = vm->curThread;
+    vm->curThread = curThread->caller;
+    // 将当前线程的主调方设置为 NULL，断开与主调用的调用关系
+    curThread->caller = NULL;
+
+    if (vm->curThread != NULL) {
+        // 为保持通用的栈结构,如果当前线程有主调方，就将空值做为返回值放在主调方的栈顶
+        vm->curThread->esp[-1] = VT_TO_VALUE(VT_NULL);
+    }
+    // 返回 false 给虚拟机，表示需要切换线程
+    // 虚拟机会从 vm->curThread 中获取当前运行的线程，在函数开头已经将 vm->curThread 设置成当前线程的主调方
+    // 如果 vm->curThread 为 NULL，虚拟机就认为全部线程执行完毕，可以退出了
+    return false;
+}
+
+// 切换到下一个线程 nextThread
+static bool switchThread(VM *vm, ObjThread *nextThread, Value *args, bool withArg) {
+    // 在下一线程 nextThread 执行之前,其主调线程应该为空
+    if (nextThread->caller != NULL) {
+        RUN_ERROR("thread has been called!");
+    }
+
+    // 将下一个线程 nextThread 指向当前线程
+    nextThread->caller = vm->curThread;
+
+    // 只有已经运行完毕的线程 thread 的 usedFrameNum 才为 0，这种没有执行任务的线程不应该被调用
+    if (nextThread->usedFrameNum == 0) {
+        SET_ERROR_FALSE(vm, "a finished thread can`t be switched to!");
+    }
+
+    // 如果线程上次运行已经出错了，其 errorObj 就会记录出错对象，已经出错的线程不应该被调用
+    if (!VALUE_IS_NULL(nextThread->errorObj)) {
+        SET_ERROR_FALSE(vm, "a aborted thread can`t be switched to!");
+    }
+
+    // 背景知识：
+    // 尽管待运行线程 nextThread 能运行是调用了该线程对象的 call 方法，但是 call 方法的参数可是存储都在当前线程 curThread 的栈中
+    // 确切的说是存储在 curThread 中当前正在运行的闭包的运行时栈中
+    // 当前线程 curThread 正要交出 CPU 使用权给 nextThread，待将来 nextThread 运行完毕后，再将 CPU 使用权交还给主调方，即 curThread
+    // 则 curThread 恢复运行，curThread 需要从栈顶获取此时所调用的 nextThread 线程的返回值，所以我们需要将 nextThread 的返回值存储到
+    // 主调方即当前线程 curThread 的栈顶，如此 curThread 才能拿到 nextThread 的返回值
+
+    // 如果主调方是通过 nextThread.call() 无参数的形式激活 nextThread 运行，那么主调方栈中只有一个参数即 nextThread，此时正好用
+    // nextThread 在栈中的 slot 来存储将来 nextThread 运行后的返回值
+    // 如果主调方是通过 nextThread.call(arg) 有参数的形式激活 nextThread 运行，那么主调方栈中有一两个参数，分别是 nextThread 和 arg
+    // 占用两个 slot，由于当前主调线程只需要一个 slot 来存储 nextThread 运行后的返回值，所以需要回收一个 slot 空间，
+    // 只保留次栈顶用于存储 nextThread 运行后的返回值
+    if (withArg) {
+        vm->curThread->esp--;
+    }
+
+    ASSERT(nextThread->esp > nextThread->stack, "esp should be greater than stack!");
+
+    // 线程 nextThread 如果之前通过 yield 让出了 CUP 使用权给主调方 curThread，
+    // 这次主调方 curThread 又通过 nextThread.call(arg) 使 nextThread 恢复运行
+    // 那么 nextThread.call(arg) 中的 arg 将作为返回值存储到 nextThread 的栈顶
+    nextThread->esp[-1] = withArg ? args[1] : VT_TO_VALUE(VT_NULL);
+
+    // 虚拟机是根据 vm->curThread 来确定当前运行的线程，设置当前线程为 nextThread
+    vm->curThread = nextThread;
+
+    // 返回 false 使虚拟机进行线程切换
+    return false;
+}
+
+// objThread.call(arg): 有参数调用下一个线程 nextThread
+// 该方法是脚本中调用 objThread.call(arg) 所执行的原生方法，注意是实例方法不是类方法
+// 对于脚本来说，当前方法调用 Thread.call(arg) 拥有两个参数，即 Thread 和 arg，分别是 args[0] 和 args[1]
+static bool primThreadCallWithArg(VM *vm, Value *args) {
+    return switchThread(vm, VALUE_TO_OBJTHREAD(args[0]), args, true);
+}
+
+// objThread.call(): 无参数调用下一个线程 nextThread
+// 该方法是脚本中调用 objThread.call() 所执行的原生方法，注意是实例方法不是类方法
+// 对于脚本来说，当前方法调用 Thread.call() 拥有一个参数，即 Thread，也就是 args[0]
+static bool primThreadCallWithoutArg(VM *vm, Value *args) {
+    return switchThread(vm, VALUE_TO_OBJTHREAD(args[0]), args, false);
+}
+
+// objThread.isDone：返回线程是否运行完成
+// 该方法是脚本中调用 objThread.isDone 所执行的原生方法，注意是实例方法不是类方法
+static bool primThreadIsDone(VM *vm UNUSED, Value *args) {
+    // 对于脚本来说，当前方法调用 Thread.isDone 拥有一个参数，即 Thread，也就是 args[0]，isDone 的调用者
+    ObjThread *objThread = VALUE_TO_OBJTHREAD(args[0]);
+    // 线程运行完毕的两种情况：
+    // 1. 帧栈使用量 usedFramNum 为 0
+    // 2. 线程是否有错误出现
+    RET_BOOL(objThread->usedFrameNum == 0 || !VALUE_IS_NULL(objThread->errorObj));
+}
+
 /**
  * 定义objectClass 的元信息类的原生方法（提供脚本语言调用）
 **/
@@ -209,6 +367,15 @@ static Value getCoreClassValue(ObjModule *objModule, const char *name) {
         RUN_ERROR("something wrong occur: missing core class \"%s\"!", id);
     }
     return objModule->moduleVarValue.datas[index];
+}
+
+// 检验是否为函数
+static bool validateFn(VM *vm, Value arg) {
+    if (VALUE_TO_OBJCLOSURE(arg)) {
+        return true;
+    }
+    vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "argument must be a function!", 28));
+    return false;
 }
 
 // 从 vm->allModules 中获取名为 moduleName 的模块
@@ -313,10 +480,24 @@ void buildCore(VM *vm) {
     //执行核心模块
     executeModule(vm, CORE_MODULE, coreModuleCode);
 
-    // Bool 类定义在 core.script.inc，将其挂在到 vm 上，并绑定原生方法
+    // Bool 类定义在 core.script.inc，将其挂在到 vm->boolClass 上，并绑定原生方法
     vm->boolClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "bool"));
     PRIM_METHOD_BIND(vm->boolClass, "toString", primBoolToString);
     PRIM_METHOD_BIND(vm->boolClass, "!", primBoolNot);
+
+    // Thread 类也是定义在 core.script.inc，将其挂载到 vm->threadClass，并绑定原生方法
+    vm->threadClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Thread"));
+    //以下是 Thread 类方法
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "new(_)", primThreadNew);
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "abort(_)", primThreadAbort);
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "current", primThreadCurrent);
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "suspend()", primThreadSuspend);
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "yield(_)", primThreadYieldWithArg);
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "yield()", primThreadYieldWithoutArg);
+    //以下是 Thread 实例方法
+    PRIM_METHOD_BIND(vm->threadClass, "call()", primThreadCallWithoutArg);
+    PRIM_METHOD_BIND(vm->threadClass, "call(_)", primThreadCallWithArg);
+    PRIM_METHOD_BIND(vm->threadClass, "isDone", primThreadIsDone);
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
