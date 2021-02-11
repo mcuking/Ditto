@@ -45,7 +45,7 @@ void mapSet(VM *vm, ObjMap *objMap, Value key, Value value) {
 }
 
 // 获取 map 对象的键值为 key 的地方的值
-Value mapGet(VM *vm, ObjMap *objMap, Value key) {
+Value mapGet(ObjMap *objMap, Value key) {
     Entry *entry = findEntry(objMap, key);
 
     // 如果 map 对象中没有找到 key 对应的 entry，则返回 undefined

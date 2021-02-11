@@ -26,7 +26,7 @@ ObjMap *newObjMap(VM *vm);
 void mapSet(VM *vm, ObjMap *objMap, Value key, Value value);
 
 // 获取 map 对象的键值为 key 的地方的值
-Value mapGet(VM *vm, ObjMap *objMap, Value key);
+Value mapGet(ObjMap *objMap, Value key);
 
 // 删除 map 对象的键值为 key 的地方的值
 Value removeKey(VM *vm, ObjMap *objMap, Value key);
