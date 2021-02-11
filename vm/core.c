@@ -633,8 +633,8 @@ static bool primStringPlus(VM *vm, Value *args) {
 // 该方法是脚本中调用 objString[args[1]] 所执行的原生方法，其中 nargs[1]为数字或者 objRange 对象，该方法为实例方法
 static bool primStringSubscript(VM *vm, Value *args) {
     ObjString *objString = VALUE_TO_OBJSTR(args[0]);
-    // 索引可以是数字或 objRange 对象
 
+    // 索引可以是数字或 objRange 对象
     // 1. 如果索引是数字，就直接索引 1 个字符
     if (VALUE_IS_NUM(args[1])) {
         // 先判断该数字是否是在 [0, objString->value.length) 区间
@@ -788,6 +788,141 @@ static bool primStringEndsWith(VM *vm UNUSED, Value *args) {
 // 该方法是脚本中调用 objString.toString() 所执行的原生方法，该方法为实例方法
 static bool primStringToString(VM *vm UNUSED, Value *args) {
     RET_VALUE(args[0]);
+}
+
+/**
+ * List 类的原生方法
+**/
+
+// 创建 list 实例
+// 该方法是脚本中调用 ObjList.new() 所执行的原生方法，该方法为类方法
+static bool primListNew(VM *vm, Value *args UNUSED) {
+    // 返回列表自身
+    RET_OBJ(newObjList(vm, 0));
+}
+
+// 索引 list 中的元素（索引可以是数字或者 objRange 实例）
+// 该方法是脚本中调用 objList[args[1]] 所执行的原生方法，该方法为实例方法
+static bool primListSubscript(VM *vm, Value *args) {
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+
+    // 索引可以是数字或 objRange 对象
+    // 1. 如果索引是数字，就直接索引 1 个字符
+    if (VALUE_IS_NUM(args[1])) {
+        // 先判断该数字是否是在 [0, objString->value.length) 区间
+        uint32_t index = validateIndex(vm, args[1], objList->elements.count);
+        if (index == UINT32_MAX) {
+            return false;
+        }
+        // 若数字合法，则获取该元素并返回
+        RET_VALUE(objList->elements.datas[index]);
+    }
+
+    // 2. 如果索引不是数字，必定为 objRange 对象，否则报错
+    if (!VALUE_IS_OBJRANGE(args[1])) {
+        SET_ERROR_FALSE(vm, "subscript should be integer or range!");
+    }
+
+    // direction是索引的方向，1 表示正方向，即索引值递增，-1表示反方向，即索引值递减
+    // from 若比 to大，即索引值递减，则为反方向，direction 为 1
+    int direction;
+    uint32_t count = objList->elements.count;
+
+    // 返回的 startIndex 是 objRange.from 在 objString.value.start 中的下标
+    // calculateRange 主要是判断 objRange.from 和 objRange.to 是否在 [0, objString->value.length) 区间内，即索引范围是否合法
+    uint32_t startIndex = calculateRange(vm, VALUE_TO_OBJRANGE(args[1]), &count, &direction);
+
+    // 新建一个 list 存储该 range 在原来 list 中索引的元素
+    ObjList *result = newObjList(vm, count);
+    uint32_t idx = 0;
+    while (idx < count) {
+        // direction为 -1 表示从后往前倒序赋值
+        // 如 var l = [a,b,c,d,e,f,g]; l[5..3]表示[f,e,d]
+        result->elements.datas[idx] = objList->elements.datas[startIndex + idx * direction];
+        idx++;
+    }
+    RET_OBJ(result);
+}
+
+// 对 list 中某个索引的元素赋值（索引只能是数字）
+// 该方法是脚本中调用 objList[args[1]] = args[2] 所执行的原生方法，该方法为实例方法
+static bool primListSubscriptSetter(VM *vm UNUSED, Value *args) {
+    // 获取对象
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+
+    // 获取索引
+    uint32_t index = validateIndex(vm, args[1], objList->elements.count);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+
+    // 直接赋值
+    objList->elements.datas[index] = args[2];
+
+    // 把要赋的值 args[2] 做为返回值
+    RET_VALUE(args[2]);
+}
+
+// 向 list 后面追加元素
+// 该方法是脚本中调用 objList.add(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primListAdd(VM *vm, Value *args) {
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+    ValueBufferAdd(vm, &objList->elements, args[1]);
+    // 将要追加的元素 args[1] 做为返回值
+    RET_VALUE(args[1]);
+}
+
+// 向 list 后面追加元素
+// 该方法是脚本中调用 objList.addCore_(args[1]) 所执行的原生方法，该方法为实例方法
+// 该方法主要用于内部使用，主要是为了支持字面量形式创建的 list 而非 List.new() 方式，例如 var l = [1, 4, 7];
+static bool primListAddCore(VM *vm, Value *args) {
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+    ValueBufferAdd(vm, &objList->elements, args[1]);
+    // 返回列表自身
+    RET_VALUE(args[0]);
+}
+
+// 向 list 中某个位置插入元素
+// 该方法是脚本中调用 objList.insert(args[1], args[2]) 所执行的原生方法，args[1] 为索引，args[2] 为元素，该方法为实例方法
+static bool primListInsert(VM *vm, Value *args) {
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+    // +1 确保可以在最后插入
+    uint32_t index = validateIndex(vm, args[1], objList->elements.count + 1);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+    insertElement(vm, objList, index, args[2]);
+    // 元素 args[2] 做为返回值
+    RET_VALUE(args[2]);
+}
+
+// 删除 list 中某个位置的元素
+// 该方法是脚本中调用 objList.removeAt(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primListRemoveAt(VM *vm, Value *args) {
+    //获取实例对象
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+
+    uint32_t index = validateIndex(vm, args[1], objList->elements.count);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+    // 被删除的元素做为返回值
+    RET_VALUE(removeElement(vm, objList, index));
+}
+
+// 清空 list 中所有元素
+// 该方法是脚本中调用 objList.clear() 所执行的原生方法，该方法为实例方法
+static bool primListClear(VM *vm, Value *args) {
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+    ValueBufferClear(vm, &objList->elements);
+    RET_NULL;
+}
+
+// 返回 list 的元素个数
+// 该方法是脚本中调用 objList.count 所执行的原生方法，该方法为实例方法
+static bool primListCount(VM *vm UNUSED, Value *args) {
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+    RET_NUM(objList->elements.count);
 }
 
 /**
@@ -1313,6 +1448,20 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->stringClass, "endsWith(_)", primStringEndsWith);
     PRIM_METHOD_BIND(vm->stringClass, "toString", primStringToString);
     PRIM_METHOD_BIND(vm->stringClass, "count", primStringByteCount);
+
+    // List 类定义在 core.script.inc，将其挂载到 vm->listClass，并绑定原生方法
+    vm->listClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "List"));
+    // 以下是 List 类方法
+    PRIM_METHOD_BIND(vm->listClass->objHeader.class, "new()", primListNew);
+    // 以下是 List 实例方法
+    PRIM_METHOD_BIND(vm->listClass, "[_]", primListSubscript);
+    PRIM_METHOD_BIND(vm->listClass, "[_]=(_)", primListSubscriptSetter);
+    PRIM_METHOD_BIND(vm->listClass, "add(_)", primListAdd);
+    PRIM_METHOD_BIND(vm->listClass, "addCore_(_)", primListAddCore);
+    PRIM_METHOD_BIND(vm->listClass, "insert(_,_)", primListInsert);
+    PRIM_METHOD_BIND(vm->listClass, "removeAt(_)", primListRemoveAt);
+    PRIM_METHOD_BIND(vm->listClass, "clear()", primListClear);
+    PRIM_METHOD_BIND(vm->listClass, "count", primListCount);
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
