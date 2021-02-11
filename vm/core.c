@@ -1028,6 +1028,38 @@ static bool primMapCount(VM *vm UNUSED, Value *args) {
 }
 
 /**
+ * range 类的原生方法
+**/
+
+// 返回 range 实例对象的 from 属性的值
+// 该方法是脚本中调用 objRange.from 所执行的原生方法，该方法为实例方法
+static bool primRangeFrom(VM *vm UNUSED, Value *args) {
+    ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
+    RET_NUM(objRange->from);
+}
+
+// 返回 range 实例对象的 to 属性的值
+// 该方法是脚本中调用 objRange.to 所执行的原生方法，该方法为实例方法
+static bool primRangeTo(VM *vm UNUSED, Value *args) {
+    ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
+    RET_NUM(objRange->to);
+}
+
+// 返回 range 实例对象的 from 属性和 to 属性的中的较小值
+// 该方法是脚本中调用 objRange.min 所执行的原生方法，该方法为实例方法
+static bool primRangeMin(VM *vm UNUSED, Value *args) {
+    ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
+    RET_NUM(fmin(objRange->from, objRange->to));
+}
+
+// 返回 range 实例对象的 from 属性和 to 属性的中的较大值
+// 该方法是脚本中调用 objRange.max 所执行的原生方法，该方法为实例方法
+static bool primRangeMax(VM *vm UNUSED, Value *args) {
+    ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
+    RET_NUM(fmax(objRange->from, objRange->to));
+}
+
+/**
  * 至此，原生方法定义部分结束
 **/
 
@@ -1577,6 +1609,14 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->mapClass, "clear()", primMapClear);
     PRIM_METHOD_BIND(vm->mapClass, "containsKey(_)", primMapContainsKey);
     PRIM_METHOD_BIND(vm->mapClass, "count", primMapCount);
+
+    /* range 类定义在 core.script.inc，将其挂载到 vm->rangeClass，并绑定原生方法 */
+    vm->rangeClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Range"));
+    // 以下是 range 实例方法
+    PRIM_METHOD_BIND(vm->rangeClass, "from", primRangeFrom);
+    PRIM_METHOD_BIND(vm->rangeClass, "to", primRangeTo);
+    PRIM_METHOD_BIND(vm->rangeClass, "min", primRangeMin);
+    PRIM_METHOD_BIND(vm->rangeClass, "max", primRangeMax);
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
