@@ -926,6 +926,108 @@ static bool primListCount(VM *vm UNUSED, Value *args) {
 }
 
 /**
+ * Map 类的原生方法
+**/
+
+// 创建 map 实例
+// 该方法是脚本中调用 ObjMap.new() 所执行的原生方法，该方法为类方法
+static bool primMapNew(VM *vm, Value *args UNUSED) {
+    RET_OBJ(newObjMap(vm));
+}
+
+// 获取 map[key] 对应的 value
+// 该方法是脚本中调用 objMap[args[1]] 所执行的原生方法，该方法为类方法
+static bool primMapSubscript(VM *vm, Value *args) {
+    // 先校验 key 的合法性
+    if (!validateKey(vm, args[1])) {
+        return false;
+    }
+
+    // 获得 map 对象实例
+    ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
+
+    // 从 map 中查找 key 即 args[1] 对应的 value
+    Value value = mapGet(objMap, args[1]);
+
+    // 若没有相应的 key 则返回 NULL
+    if (VALUE_IS_UNDEFINED(value)) {
+        RET_NULL;
+    }
+    RET_VALUE(value);
+}
+
+// 对 map[key] 赋值
+// 该方法是脚本中调用 objMap[args[1]] = args[2] 所执行的原生方法，其中 args[1] 为 key，args[2] 为要赋的值，该方法为实例方法
+static bool primMapSubscriptSetter(VM *vm, Value *args) {
+    // 先校验 key 的合法性
+    if (!validateKey(vm, args[1])) {
+        return false;
+    }
+
+    // 获得 map 对象实例
+    ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
+
+    // 在 map 中将 key 和 value 关联，即 map[key] = value
+    mapSet(vm, objMap, args[1], args[2]);
+    RET_VALUE(args[2]);
+}
+
+// 在 map 中添加 key-value 对并返回 map 自身
+// 该方法是脚本中调用 objMap.addCore_(args[1], args[2]) 所执行的原生方法，该方法为实例方法
+// 该方法主要用于内部使用，主要是为了支持字面量形式创建的 map 而非 Map.new() 方式，例如 var map = {a: 1};
+static bool primMapAddCore(VM *vm, Value *args) {
+    // 先校验 key 的合法性
+    if (!validateKey(vm, args[1])) {
+        return false;
+    }
+
+    //获得 map 对象实例
+    ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
+
+    // 在 map 中将 key 和 value 关联，即 map[key] = value
+    mapSet(vm, objMap, args[1], args[2]);
+    // 返回 map 对象自身
+    RET_VALUE(args[0]);
+}
+
+// 删除 map 中对应 key 的 entry（即 key-value 对）
+// 该方法是脚本中调用 objMap.remove(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primMapRemove(VM *vm, Value *args) {
+    // 先校验 key 的合法性
+    if (!validateKey(vm, args[1])) {
+        return false;
+    }
+
+    RET_VALUE(removeKey(vm, VALUE_TO_OBJMAP(args[0]), args[1]));
+}
+
+// 清空 map
+// 该方法是脚本中调用 objMap.clear() 所执行的原生方法，该方法为实例方法
+static bool primMapClear(VM *vm, Value *args) {
+    clearMap(vm, VALUE_TO_OBJMAP(args[0]));
+    RET_NULL;
+}
+
+// 判断 map 即 args[0] 是否包含 key 即 args[1]
+// 该方法是脚本中调用 objMap.containsKey(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primMapContainsKey(VM *vm, Value *args) {
+    // 先校验 key 的合法性
+    if (!validateKey(vm, args[1])) {
+        return false;
+    }
+
+    // 从 map 中获取该 key 对应的 value，如果 value 存在则 key 存在，否则不存在
+    RET_BOOL(!VALUE_IS_UNDEFINED(mapGet(VALUE_TO_OBJMAP(args[0]), args[1])));
+}
+
+// 获取 map 中 entry 个数，即 key-value 的对数
+// 该方法是脚本中调用 objMap.count 所执行的原生方法，该方法为实例方法
+static bool primMapCount(VM *vm UNUSED, Value *args) {
+    ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
+    RET_NUM(objMap->count);
+}
+
+/**
  * 至此，原生方法定义部分结束
 **/
 
@@ -1244,7 +1346,7 @@ static Value getCoreClassValue(ObjModule *objModule, const char *name) {
 
 // 从 vm->allModules 中获取名为 moduleName 的模块
 static ObjModule *getModule(VM *vm, Value moduleName) {
-    Value value = mapGet(vm, vm->allModules, moduleName);
+    Value value = mapGet(vm->allModules, moduleName);
 
     if (value.type == VT_UNDEFINED) {
         return NULL;
@@ -1344,12 +1446,12 @@ void buildCore(VM *vm) {
     //执行核心模块
     executeModule(vm, CORE_MODULE, coreModuleCode);
 
-    // Bool 类定义在 core.script.inc，将其挂在到 vm->boolClass 上，并绑定原生方法
+    /* Bool 类定义在 core.script.inc，将其挂载到 vm->boolClass，并绑定原生方法 */
     vm->boolClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "bool"));
     PRIM_METHOD_BIND(vm->boolClass, "toString", primBoolToString);
     PRIM_METHOD_BIND(vm->boolClass, "!", primBoolNot);
 
-    // Thread 类定义在 core.script.inc，将其挂载到 vm->threadClass，并绑定原生方法
+    /* Thread 类定义在 core.script.inc，将其挂载到 vm->threadClass，并绑定原生方法 */
     vm->threadClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Thread"));
     // 以下是 Thread 类方法
     PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "new(_)", primThreadNew);
@@ -1363,7 +1465,7 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->threadClass, "call(_)", primThreadCallWithArg);
     PRIM_METHOD_BIND(vm->threadClass, "isDone", primThreadIsDone);
 
-    // Fn 类定义在 core.script.inc，将其挂载到 vm->fnClass，并绑定原生方法
+    /* Fn 类定义在 core.script.inc，将其挂载到 vm->fnClass，并绑定原生方法 */
     vm->fnClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Fn"));
     PRIM_METHOD_BIND(vm->fnClass->objHeader.class, "new(_)", primFnNew);
 
@@ -1386,12 +1488,12 @@ void buildCore(VM *vm) {
     bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
     bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
 
-    // Null 类定义在 core.script.inc，将其挂载到 vm->nullClass，并绑定原生方法
+    /* Null 类定义在 core.script.inc，将其挂载到 vm->nullClass，并绑定原生方法 */
     vm->nullClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Null"));
     PRIM_METHOD_BIND(vm->nullClass, "!", primNullNot);
     PRIM_METHOD_BIND(vm->nullClass, "toString", primNullToString);
 
-    // Num 类定义在 core.script.inc，将其挂载到 vm->numClass，并绑定原生方法
+    /* Num 类定义在 core.script.inc，将其挂载到 vm->numClass，并绑定原生方法 */
     vm->numClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Num"));
     // 以下是 Num 类方法
     PRIM_METHOD_BIND(vm->numClass->objHeader.class, "fromString(_)", primNumFromString);
@@ -1432,7 +1534,7 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->numClass, "==(_)", primNumEqual);
     PRIM_METHOD_BIND(vm->numClass, "!=(_)", primNumNotEqual);
 
-    // String 类定义在 core.script.inc，将其挂载到 vm->stringClass，并绑定原生方法
+    /* String 类定义在 core.script.inc，将其挂载到 vm->stringClass，并绑定原生方法 */
     vm->stringClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "String"));
     // 以下是 String 类方法
     PRIM_METHOD_BIND(vm->stringClass->objHeader.class, "fromCodePoint(_)", primStringFromCodePoint);
@@ -1449,7 +1551,7 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->stringClass, "toString", primStringToString);
     PRIM_METHOD_BIND(vm->stringClass, "count", primStringByteCount);
 
-    // List 类定义在 core.script.inc，将其挂载到 vm->listClass，并绑定原生方法
+    /* List 类定义在 core.script.inc，将其挂载到 vm->listClass，并绑定原生方法 */
     vm->listClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "List"));
     // 以下是 List 类方法
     PRIM_METHOD_BIND(vm->listClass->objHeader.class, "new()", primListNew);
@@ -1462,6 +1564,19 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->listClass, "removeAt(_)", primListRemoveAt);
     PRIM_METHOD_BIND(vm->listClass, "clear()", primListClear);
     PRIM_METHOD_BIND(vm->listClass, "count", primListCount);
+
+    /* Map 类定义在 core.script.inc，将其挂载到 vm->mapClass，并绑定原生方法 */
+    vm->mapClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Map"));
+    // 以下是 Map 类方法
+    PRIM_METHOD_BIND(vm->mapClass->objHeader.class, "new()", primMapNew);
+    // 以下是 Map 实例方法
+    PRIM_METHOD_BIND(vm->mapClass, "[_]", primMapSubscript);
+    PRIM_METHOD_BIND(vm->mapClass, "[_]=(_)", primMapSubscriptSetter);
+    PRIM_METHOD_BIND(vm->mapClass, "addCore_(_,_)", primMapAddCore);
+    PRIM_METHOD_BIND(vm->mapClass, "remove(_)", primMapRemove);
+    PRIM_METHOD_BIND(vm->mapClass, "clear()", primMapClear);
+    PRIM_METHOD_BIND(vm->mapClass, "containsKey(_)", primMapContainsKey);
+    PRIM_METHOD_BIND(vm->mapClass, "count", primMapCount);
 }
 
 // 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
