@@ -23,78 +23,60 @@ ObjMap *newObjMap(VM *vm) {
     return objMap;
 }
 
-// 向 map 对象的键值为 key 的地方设置值 value
-void mapSet(VM *vm, ObjMap *objMap, Value key, Value value) {
-    // 如果新增一个 entry 后，容量利用率超过 80 % 时，就需要扩容
-    if (objMap->count + 1 > objMap->capacity * MAP_LOAD_PERCENT) {
-        uint32_t newCapacity = objMap->capacity * CAPACIRY_GROW_FACTOR; // 新空间为到旧空间的 4 倍
-        // 如果小于容量最小值 64，则按照最小值设置
-        if (newCapacity < MIN_CAPACITY) {
-            newCapacity = MIN_CAPACITY;
+// 计算数字的哈希值
+static uint32_t hashNum(double num) {
+    Bits64 bits64;
+    bits64.num = num;
+    // num 的高 32 位和低 32 位异或的结果作为 num 的哈希值
+    return bits64.bits32[0] ^ bits64.bits32[1];
+}
+
+// 计算对象的哈希值
+static uint32_t hashObj(ObjHeader *objHeader) {
+    switch (objHeader->type) {
+        case OT_STRING:
+            // 直接返回 string 对象的 hashCode
+            return ((ObjString *)objHeader)->hashCode;
+        case OT_RANGE: {
+            // 强制类型转换成 range 对象
+            ObjRange *objRange = (ObjRange *)objHeader;
+            // 返回 range 对象的 from 和 to 的哈希值再做异或的值
+            return hashNum(objRange->from) ^ hashNum(objRange->to);
         }
-
-        resizeMap(vm, objMap, newCapacity);
-    }
-
-    // 判断是新增的 entry，还是覆盖原有的 entry
-    bool isNewAdd = addEntry(objMap->entries, objMap->capacity, key, value);
-    // 如果创建了新的 key 则 objMap->count 加 1
-    if (isNewAdd) {
-        objMap->count++;
-    }
-}
-
-// 获取 map 对象的键值为 key 的地方的值
-Value mapGet(ObjMap *objMap, Value key) {
-    Entry *entry = findEntry(objMap, key);
-
-    // 如果 map 对象中没有找到 key 对应的 entry，则返回 undefined
-    if (entry == NULL) {
-        return VT_TO_VALUE(VT_UNDEFINED);
-    }
-
-    // 找到则返回 key 对应的 value
-    return entry->value;
-}
-
-// 删除 map 对象的键值为 key 的地方的值
-Value removeKey(VM *vm, ObjMap *objMap, Value key) {
-    Entry *entry = findEntry(objMap, key);
-
-    // 如果没有 key 对应的值则返回 NULL
-    if (entry == NULL) {
-        return VT_TO_VALUE(VT_NULL);
-    }
-
-    Value value = entry->value;
-    entry->key = VT_TO_VALUE(VT_UNDEFINED); // 将 entry 的 key 的 type 设置成 VT_UNDEFINED
-    entry->value = VT_TO_VALUE(VT_TRUE);    // 将 entry 的 key 的 type 设置成 VT_TRUE，用于在冲突探测链中标记此处槽位 slot 为删除，而非未使用过
-    objMap->count--;
-
-    // 如果删除后 objMap 为空，则回收内存空间
-    if (objMap->count == 0) {
-        clearMap(vm, objMap);
-    }
-    // 如果删除后实际使用槽位 slot 数量小于容量的 1 / 4 的 80%，且实际使用量仍大于规定的最小容量，则缩小容量
-    else if ((objMap->count < objMap->capacity / CAPACIRY_GROW_FACTOR * MAP_LOAD_PERCENT) && objMap->count > MIN_CAPACITY) {
-        uint32_t newCapacity = objMap->capacity / CAPACIRY_GROW_FACTOR;
-
-        // 如果缩小的新容量小于最小容量，则设置为最小容量
-        if (newCapacity < MIN_CAPACITY) {
-            newCapacity = MIN_CAPACITY;
+        case OT_CLASS: {
+            // 强制类型转换成 class 对象
+            Class *class = (Class *)objHeader;
+            // 返回 class 对象的 name 字符串的哈希值
+            return hashString(class->name->value.start, class->name->value.length);
         }
-
-        resizeMap(vm, objMap, newCapacity);
+        default:
+            RUN_ERROR("the hashable needs be objstring, objrange and class.");
     }
-
-    return value;
+    return 0;
 }
 
-// 删除 map 对象，即收回 map 对象占用的内存
-void clearMap(VM *vm, ObjMap *objMap) {
-    DEALLOCATE_ARRAY(vm, objMap->entries, objMap->count);
-    objMap->entries = NULL;
-    objMap->count = objMap->capacity = 0;
+// 根据 value 的类型调用相应的方法计算其哈希值
+static uint32_t hashValue(Value value) {
+    switch (value.type) {
+        case VT_FALSE:
+            return 0;
+            break;
+        case VT_NULL:
+            return 1;
+            break;
+        case VT_TRUE:
+            return 2;
+            break;
+        case VT_NUM:
+            return hashNum(value.num);
+            break;
+        case VT_OBJ:
+            return hashObj(value.objHeader);
+            break;
+        default:
+            RUN_ERROR("unsupport type dashed!");
+    }
+    return 0;
 }
 
 // 向 entries 中添加 entry
@@ -203,60 +185,76 @@ static void resizeMap(VM *vm, ObjMap *objMap, uint32_t newCapacity) {
     objMap->capacity = newCapacity; // 更新容量
 }
 
-// 计算数字的哈希值
-static uint32_t hashNum(double num) {
-    Bits64 bits64;
-    bits64.num = num;
-    // num 的高 32 位和低 32 位异或的结果作为 num 的哈希值
-    return bits64.bits32[0] ^ bits64.bits32[1];
+// 向 map 对象的键值为 key 的地方设置值 value
+void mapSet(VM *vm, ObjMap *objMap, Value key, Value value) {
+    // 如果新增一个 entry 后，容量利用率超过 80 % 时，就需要扩容
+    if (objMap->count + 1 > objMap->capacity * MAP_LOAD_PERCENT) {
+        uint32_t newCapacity = objMap->capacity * CAPACIRY_GROW_FACTOR; // 新空间为到旧空间的 4 倍
+        // 如果小于容量最小值 64，则按照最小值设置
+        if (newCapacity < MIN_CAPACITY) {
+            newCapacity = MIN_CAPACITY;
+        }
+
+        resizeMap(vm, objMap, newCapacity);
+    }
+
+    // 判断是新增的 entry，还是覆盖原有的 entry
+    bool isNewAdd = addEntry(objMap->entries, objMap->capacity, key, value);
+    // 如果创建了新的 key 则 objMap->count 加 1
+    if (isNewAdd) {
+        objMap->count++;
+    }
 }
 
-// 计算对象的哈希值
-static uint32_t hashObj(ObjHeader *objHeader) {
-    switch (objHeader->type) {
-        case OT_STRING:
-            // 强制类型转换成 string 对象
-            ObjString *objString = (ObjString *)objHeader;
-            // 直接返回 string 对象的 hashCode
-            return objString->hashCode;
-            break;
-        case OT_RANGE:
-            // 强制类型转换成 range 对象
-            ObjRange *objRange = (ObjRange *)objHeader;
-            // 返回 range 对象的 from 和 to 的哈希值再做异或的值
-            return hashNum(objRange->from) ^ hashNum(objRange->to);
-            break;
-        case OT_CLASS:
-            // 强制类型转换成 class 对象
-            Class *class = (Class *)objHeader;
-            // 返回 class 对象的 name 字符串的哈希值
-            return hashString(class->name->value.start, class->name->value.length);
-        default:
-            RUN_ERROR("the hashable needs be objstring, objrange and class.");
+// 获取 map 对象的键值为 key 的地方的值
+Value mapGet(ObjMap *objMap, Value key) {
+    Entry *entry = findEntry(objMap, key);
+
+    // 如果 map 对象中没有找到 key 对应的 entry，则返回 undefined
+    if (entry == NULL) {
+        return VT_TO_VALUE(VT_UNDEFINED);
     }
-    return 0;
+
+    // 找到则返回 key 对应的 value
+    return entry->value;
 }
 
-// 根据 value 的类型调用相应的方法计算其哈希值
-static uint32_t hashValue(Value value) {
-    switch (value.type) {
-        case VT_FALSE:
-            return 0;
-            break;
-        case VT_NULL:
-            return 1;
-            break;
-        case VT_TRUE:
-            return 2;
-            break;
-        case VT_NUM:
-            return hashNum(value.num);
-            break;
-        case VT_OBJ:
-            return hashObj(value.objHeader);
-            break;
-        default:
-            RUN_ERROR("unsupport type dashed!");
+// 删除 map 对象的键值为 key 的地方的值
+Value removeKey(VM *vm, ObjMap *objMap, Value key) {
+    Entry *entry = findEntry(objMap, key);
+
+    // 如果没有 key 对应的值则返回 NULL
+    if (entry == NULL) {
+        return VT_TO_VALUE(VT_NULL);
     }
-    return 0;
+
+    Value value = entry->value;
+    entry->key = VT_TO_VALUE(VT_UNDEFINED); // 将 entry 的 key 的 type 设置成 VT_UNDEFINED
+    entry->value = VT_TO_VALUE(VT_TRUE);    // 将 entry 的 key 的 type 设置成 VT_TRUE，用于在冲突探测链中标记此处槽位 slot 为删除，而非未使用过
+    objMap->count--;
+
+    // 如果删除后 objMap 为空，则回收内存空间
+    if (objMap->count == 0) {
+        clearMap(vm, objMap);
+    }
+    // 如果删除后实际使用槽位 slot 数量小于容量的 1 / 4 的 80%，且实际使用量仍大于规定的最小容量，则缩小容量
+    else if ((objMap->count < objMap->capacity / CAPACIRY_GROW_FACTOR * MAP_LOAD_PERCENT) && objMap->count > MIN_CAPACITY) {
+        uint32_t newCapacity = objMap->capacity / CAPACIRY_GROW_FACTOR;
+
+        // 如果缩小的新容量小于最小容量，则设置为最小容量
+        if (newCapacity < MIN_CAPACITY) {
+            newCapacity = MIN_CAPACITY;
+        }
+
+        resizeMap(vm, objMap, newCapacity);
+    }
+
+    return value;
+}
+
+// 删除 map 对象，即收回 map 对象占用的内存
+void clearMap(VM *vm, ObjMap *objMap) {
+    DEALLOCATE_ARRAY(vm, objMap->entries, objMap->count);
+    objMap->entries = NULL;
+    objMap->count = objMap->capacity = 0;
 }

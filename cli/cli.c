@@ -2,7 +2,6 @@
 #include "core.h"
 #include "lexer.h"
 #include "vm.h"
-#include <stdio.h>
 #include <string.h>
 
 char *tokenArray[] = {

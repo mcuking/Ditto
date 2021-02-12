@@ -5,6 +5,7 @@
 #include "unicodeUtf8.h"
 #include "utils.h"
 #include "vm.h"
+#include <ctype.h>
 #include <errno.h>
 #include <math.h>
 #include <string.h>
@@ -17,6 +18,554 @@ char *rootDir = NULL;
 
 // 宏 CORE_MODULE 用来表示核心模块，值是 VT_NUL 的 Value 结构
 #define CORE_MODULE VT_TO_VALUE(VT_NULL)
+
+// 设置线程报错
+// 返回 false 通知虚拟机当前线程已报错，该切换线程了
+#define SET_ERROR_FALSE(vmPtr, errMsg)                                 \
+    do {                                                               \
+        vmPtr->curThread->errorObj =                                   \
+            OBJ_TO_VALUE(newObjString(vmPtr, errMsg, strlen(errMsg))); \
+        return false;                                                  \
+    } while (0);
+
+// 读取源码文件的方法
+// path 为源码路径
+char *readFile(const char *path) {
+    //获取源码文件的句柄 file
+    FILE *file = fopen(path, "r");
+    if (file == NULL) {
+        IO_ERROR("Couldn't open file \"%s\"", path);
+    }
+
+    struct stat fileStat;
+    stat(path, &fileStat);
+    size_t fileSize = fileStat.st_size;
+
+    // 获取源码文件大小后，为源码字符串申请内存，多申请的1个字节是为了字符串结尾 \0
+    char *fileContent = (char *)malloc(fileSize + 1);
+    if (fileContent == NULL) {
+        MEM_ERROR("Couldn't allocate memory for reading file \"%s\".\n", path);
+    }
+
+    size_t numRead = fread(fileContent, sizeof(char), fileSize, file);
+    if (numRead < fileSize) {
+        IO_ERROR("Couldn't read file \"%s\"", path);
+    }
+    // 字符串要以 \0 结尾
+    fileContent[fileSize] = '\0';
+
+    fclose(file);
+    return fileContent;
+}
+
+// 将数字转换为字符串
+static ObjString *num2str(VM *vm, double num) {
+    // NaN 不是一个确定的值,因此 NaN 和 NaN 是不相等的
+    if (num != num) {
+        return newObjString(vm, "NaN", 3);
+    }
+
+    if (num == INFINITY) {
+        return newObjString(vm, "infinity", 8);
+    }
+
+    if (num == -INFINITY) {
+        return newObjString(vm, "-infinity", 9);
+    }
+
+    // 以下 24 字节的缓冲区足以容纳双精度到字符串的转换
+    char buf[24] = {'\0'};
+    int len = sprintf(buf, "%.14g", num);
+    return newObjString(vm, buf, len);
+}
+
+// 判断 arg 是否为字符串
+static bool validateString(VM *vm, Value arg) {
+    if (VALUE_IS_OBJSTR(arg)) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "argument must be string!");
+}
+
+// 判断 arg 是否为函数
+static bool validateFn(VM *vm, Value arg) {
+    if (VALUE_TO_OBJCLOSURE(arg)) {
+        return true;
+    }
+    vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "argument must be a function!", 28));
+    return false;
+}
+
+//判断 arg 是否为数字
+static bool validateNum(VM *vm, Value arg) {
+    if (VALUE_IS_NUM(arg)) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "argument must be number!");
+}
+
+// 判断 value 是否为整数
+static bool validateIntValue(VM *vm, double value) {
+    if (trunc(value) == value) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "argument must be integer!");
+}
+
+// 判断 arg 是否为整数
+static bool validateInt(VM *vm, Value arg) {
+    // 首先得是数字
+    if (!validateNum(vm, arg)) {
+        return false;
+    }
+
+    // 再校验数值
+    return validateIntValue(vm, VALUE_TO_NUM(arg));
+}
+
+// 判断参数 index 是否是落在 [0, length) 之间的整数
+static uint32_t validateIndexValue(VM *vm, double index, uint32_t length) {
+    // 索引必须是整数，如果校验失败则返回 UINT32_MAX
+    // UINT32_MAX 是 32 为无符号数的最大值，即 5294967295，用十六进制表示就是 0xFFFFFFFF
+    if (!validateIntValue(vm, index)) {
+        return UINT32_MAX;
+    }
+
+    // 支持负数索引，负数是从后往前索引，转换其对应的正数索引
+    if (index < 0) {
+        index += length;
+    }
+
+    // 索引应该落在 [0, length)
+    if (index >= 0 && index < length) {
+        return (uint32_t)index;
+    }
+
+    // 执行到此说明超出范围
+    vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "index out of bound!", 19));
+    return UINT32_MAX;
+}
+
+// 校验 index 合法性
+static uint32_t validateIndex(VM *vm, Value index, uint32_t length) {
+    return validateIndexValue(vm, VALUE_TO_NUM(index), length);
+}
+
+// 校验 key 合法性
+static bool validateKey(VM *vm, Value arg) {
+    if (VALUE_IS_TRUE(arg) ||
+        VALUE_IS_FALSE(arg) ||
+        VALUE_IS_NULL(arg) ||
+        VALUE_IS_NUM(arg) ||
+        VALUE_IS_OBJSTR(arg) ||
+        VALUE_IS_OBJRANGE(arg) ||
+        VALUE_IS_CLASS(arg)) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "key must be value type!");
+}
+
+// 基于码点 value 创建字符串
+static Value makeStringFromCodePoint(VM *vm, int value) {
+    uint32_t byteNum = getByteNumOfEncodeUtf8(value);
+    ASSERT(byteNum != 0, "utf8 encode bytes should be between 1 and 4!");
+
+    // +1是为了结尾的 '\0'
+    ObjString *objString = ALLOCATE_EXTRA(vm, ObjString, byteNum + 1);
+
+    if (objString == NULL) {
+        MEM_ERROR("allocate memory failed in runtime!");
+    }
+
+    initObjHeader(vm, &objString->objHeader, OT_STRING, vm->stringClass);
+    objString->value.length = byteNum;
+    objString->value.start[byteNum] = '\0';
+    encodeUtf8((uint8_t *)objString->value.start, value);
+
+    // 根据字符串对象中的值 objString->value 设置对应的哈希值给 objString->hashCode
+    hashObjString(objString);
+
+    return OBJ_TO_VALUE(objString);
+}
+
+// 用索引 index 处的字符创建字符串对象
+static Value stringCodePointAt(VM *vm, ObjString *objString, uint32_t index) {
+    ASSERT(index < objString->value.length, "index out of bound!");
+    int codePoint = decodeUtf8((uint8_t *)objString->value.start + index, objString->value.length - index);
+
+    // 若不是有效的 utf8 序列，将其处理为单个裸字符
+    if (codePoint == -1) {
+        return OBJ_TO_VALUE(newObjString(vm, &objString->value.start[index], 1));
+    }
+
+    return makeStringFromCodePoint(vm, codePoint);
+}
+
+// 计算 objRange 中元素的起始索引及索引方向
+// countPtr 指针指向存储 objRange 所能索引的元素个数的变量
+// directionPtr 指针指向存储 objRange 索引方向的变量（-1 表示反向，索引递减；1 表示正向，索引递增）
+static uint32_t calculateRange(VM *vm, ObjRange *objRange, uint32_t *countPtr, int *directionPtr) {
+    uint32_t from = validateIndexValue(vm, objRange->from, *countPtr);
+    if (from == UINT32_MAX) {
+        return UINT32_MAX;
+    }
+
+    uint32_t to = validateIndexValue(vm, objRange->to, *countPtr);
+    if (to == UINT32_MAX) {
+        return UINT32_MAX;
+    }
+
+    //如果 from 和 to 为负值,经过 validateIndexValue 已经变成了相应的正索引
+    // -1 表示反向，索引递减；1 表示正向，索引递增
+    *directionPtr = from < to ? 1 : -1;
+    // countPtr 指针指向存储 objRange 所能索引的元素个数的变量
+    *countPtr = abs((int)(from - to)) + 1;
+    return from;
+}
+
+// 按照 UTF-8 编码【从 sourceStr 中起始为 startIndex，方向为 direction 的 count 个字符】
+static ObjString *newObjStringFromSub(VM *vm, ObjString *sourceStr, int startIndex, uint32_t count, int direction) {
+    uint8_t *source = (uint8_t *)sourceStr->value.start;
+    uint32_t totalLength = 0, idx = 0;
+
+    // 计算没有 UTF-8 编码的字符的 UTF-8 编码字节数，以便后面申请内存空间
+    while (idx < count) {
+        totalLength += getByteNumOfDecodeUtf8(source[startIndex + idx * direction]);
+        idx++;
+    }
+
+    // +1 是为了结尾的 '\0'
+    ObjString *result = ALLOCATE_EXTRA(vm, ObjString, totalLength + 1);
+
+    if (result == NULL) {
+        MEM_ERROR("allocate memory failed in runtime!");
+    }
+    initObjHeader(vm, &result->objHeader, OT_STRING, vm->stringClass);
+    result->value.start[totalLength] = '\0';
+    result->value.length = totalLength;
+
+    uint8_t *dest = (uint8_t *)result->value.start;
+    idx = 0;
+    while (idx < count) {
+        int index = startIndex + idx * direction;
+        // 先调用 decodeUtf8 获得字符的码点
+        int codePoint = decodeUtf8(source + index, sourceStr->value.length - index);
+        if (codePoint != -1) {
+            // 然后调用 encodeUtf8 将码点按照 UTF-8 编码，并写入dest 即 result
+            dest += encodeUtf8(dest, codePoint);
+        }
+        idx++;
+    }
+
+    // 根据字符串对象中的值 result->value 设置对应的哈希值给 result->hashCode
+    hashObjString(result);
+    return result;
+}
+
+// 使用 Boyer-Moore-Horspool 字符串匹配算法在 haystack 中查找 needle
+static int findString(ObjString *haystack, ObjString *needle) {
+    // 如果待查找的 patten 为空则为找到，直接返回 0 即可
+    if (needle->value.length == 0) {
+        //返回起始下标 0
+        return 0;
+    }
+
+    // 若待搜索的字符串比原串还长，肯定搜不到，直接返回 -1 即可
+    if (needle->value.length > haystack->value.length) {
+        return -1;
+    }
+
+    // 构建 “bad-character shift表” 以确定窗口滑动的距离
+    // 数组 shift 的值便是滑动距离
+    uint32_t shift[UINT8_MAX];
+    // needle 中最后一个字符的下标
+    uint32_t needleEnd = needle->value.length - 1;
+
+    // 一、先假定 “bad character” 不属于 needle(即 pattern)
+    // 对于这种情况，滑动窗口跨过整个 needle
+    uint32_t idx = 0;
+    while (idx < UINT8_MAX) {
+        // 默认为滑过整个 needle 的长度
+        shift[idx] = needle->value.length;
+        idx++;
+    }
+
+    // 二、假定 haystack 中与 needle 不匹配的字符在 needle 中之前已匹配过的位置出现过
+    // 就滑动窗口以使该字符与在needle中匹配该字符的最末位置对齐。
+    // 这里预先确定需要滑动的距离
+    idx = 0;
+    while (idx < needleEnd) {
+        char c = needle->value.start[idx];
+        // idx 从前往后遍历 needle，当 needle 中有重复的字符 c 时，
+        // 后面的字符 c 会覆盖前面的同名字符 c，这保证了数组 shilf 中字符是 needle 中最末位置的字符，
+        // 从而保证了 shilf[c] 的值是 needle中 最末端同名字符与 needle 末端的偏移量
+        shift[(uint8_t)c] = needleEnd - idx;
+        idx++;
+    }
+
+    // Boyer-Moore-Horspool 是从后往前比较，这是处理 bad-character 高效的地方，
+    // 因此获取 needle 中最后一个字符，用于同 haystack 的窗口中最后一个字符比较
+    char lastChar = needle->value.start[needleEnd];
+
+    // 长度差便是滑动窗口的滑动范围
+    uint32_t range = haystack->value.length - needle->value.length;
+
+    // 从 haystack 中扫描 needle，寻找第 1 个匹配的字符，如果遍历完了就停止
+    idx = 0;
+    while (idx <= range) {
+        // 拿 needle 中最后一个字符同 haystack 窗口的最后一个字符比较
+        //（因为Boyer-Moore-Horspool是从后往前比较），如果匹配，看整个 needle 是否匹配
+        char c = haystack->value.start[idx + needleEnd];
+        if (lastChar == c &&
+            memcmp(haystack->value.start + idx, needle->value.start, needleEnd) == 0) {
+            // 找到了就返回匹配的位置
+            return idx;
+        }
+
+        // 否则就向前滑动继续下一伦比较
+        idx += shift[(uint8_t)c];
+    }
+
+    // 未找到就返回 -1
+    return -1;
+}
+
+// 根据模块名获取文件绝对路径
+// 拼接规则：rootDir + modileName + '.di'
+static char *getFilePath(const char *moduleName) {
+    uint32_t rootDirLength = rootDir == NULL ? 0 : strlen(rootDir);
+    uint32_t nameLength = strlen(moduleName);
+    uint32_t pathLength = rootDirLength + nameLength + strlen(".di");
+    char *path = (char *)malloc(pathLength + 1);
+
+    if (rootDir != NULL) {
+        memmove(path, rootDir, rootDirLength);
+    }
+
+    memmove(path + rootDirLength, moduleName, nameLength);
+    memmove(path + rootDirLength + nameLength, ".di", 3);
+    path[pathLength] = '\0';
+    return path;
+}
+
+// 读取名为 moduleName 的模块
+static char *readModule(const char *moduleName) {
+    char *modulePath = getFilePath(moduleName);
+    char *moduleCode = readFile(modulePath);
+    free(modulePath);
+    return moduleCode;
+}
+
+// 输出字符串
+static void printString(const char *str) {
+    printf("%s", str);
+    // 输出到缓冲区后立即刷新
+    fflush(stdout);
+}
+
+// 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
+int getIndexFromSymbolTable(SymbolTable *table, const char *symbol, uint32_t length) {
+    ASSERT(length != 0, "length of symbol is 0!");
+    uint32_t index = 0;
+    // 遍历 table->data，找到与 symbol 相等的，然后返回该索引值
+    while (index < table->count) {
+        if (length == table->datas[index].length == length && memcmp(table->datas[index].str, symbol, length) == 0) {
+            return index;
+        }
+        index++;
+    }
+    // 找不到则返回 -1
+    return -1;
+}
+
+// 从 vm->allModules 中获取名为 moduleName 的模块
+static ObjModule *getModule(VM *vm, Value moduleName) {
+    Value value = mapGet(vm->allModules, moduleName);
+
+    if (value.type == VT_UNDEFINED) {
+        return NULL;
+    }
+    return VALUE_TO_OBJMODULE(value);
+}
+
+// 加载名为 moduleName 的模块并进行编译
+static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode) {
+    // 先在 vm->allModules 中查找是否存在 moduleName
+    // 如果存在，说明对应模块已经加载，以避免重复加载
+    ObjModule *module = getModule(vm, moduleName);
+
+    // 否则需要先加载模块，且该模块需要继承核心模块中的变量
+    if (module == NULL) {
+        // 创建模块并添加到 vm->allModules
+        ObjString *modName = VALUE_TO_OBJSTR(moduleName);
+        ASSERT(modName->value.start[modName->value.length] == '\0', "string.value.start is not terminated!");
+        // 创建模块名为 modName 的模块对象
+        module = newObjModule(vm, modName);
+        // 将名为 moduleName 的模块加载到 vm->allModules
+        mapSet(vm, vm->allModules, moduleName, OBJ_TO_VALUE(module));
+
+        // 继承核心模块中变量，即将核心模块中的变量也拷贝到该模块中
+        // TODO: 待后续解释
+        ObjModule *coreModule = getModule(vm, CORE_MODULE);
+        uint32_t idx = 0;
+        while (idx < coreModule->moduleVarName.count) {
+            defineModuleVar(vm, module,
+                            coreModule->moduleVarName.datas[idx].str,
+                            coreModule->moduleVarName.datas[idx].length,
+                            coreModule->moduleVarValue.datas[idx]);
+            idx++;
+        }
+    }
+
+    ObjFn *fn = compileModule(vm, module, moduleCode);
+    // 单独创建一个线程运行编译后的模块
+    ObjClosure *objClosure = newObjClosure(vm, fn);
+    ObjThread *objThread = newObjThread(vm, objClosure);
+}
+
+// 导入模块 moduleName，主要是把编译模块并加载到 vm->allModules
+static Value importModule(VM *vm, Value moduleName) {
+    // 若模块已经导入则返回 NULL
+    if (!VALUE_IS_UNDEFINED(mapGet(vm->allModules, moduleName))) {
+        return VT_TO_VALUE(VT_NULL);
+    }
+    ObjString *objString = VALUE_TO_OBJSTR(moduleName);
+    // 读取名为 moduleName 的模块
+    const char *sourceCode = readModule(objString->value.start);
+
+    // 加载名为 moduleName 的模块并进行编译
+    ObjThread *moduleThread = loadModule(vm, moduleName, sourceCode);
+    return OBJ_TO_VALUE(moduleThread);
+}
+
+// 从模块 moduleName 中获取模块变量 variableName
+static Value getModuleVariable(VM *vm, Value moduleName, Value variableName) {
+    // 调用本函数前模块应该提前被加载
+    // 也就是导入模块变量之前需要导入模块，在执行本函数之前，必须先执行 importModule 函数将整个模块加载进来
+    // 所以编译 “import 模块 for 模块变量” 会先生成调用 importModule 函数的指令，再生成调用 getModuleVariable 函数的指令获取模块中某个模块变量
+    ObjModule *objModule = getModule(vm, moduleName);
+
+    // 如果模块没有被提前加载，则向 vm->curThread->errorObj 添加错误信息并返回 NULL
+    if (objModule == NULL) {
+        ObjString *modName = VALUE_TO_OBJSTR(moduleName);
+        // 24 是下面 sprintf 中 fmt 中除 %s 的字符个数
+        ASSERT(modName->value.length < 512 - 24, "id`s buffer not big enough!");
+        char id[512] = {'\0'};
+        int len = sprintf(id, "module \'%s\' is not loaded!", modName->value.start);
+        vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, id, len));
+        return VT_TO_VALUE(VT_NULL);
+    }
+
+    ObjString *varName = VALUE_TO_OBJSTR(variableName);
+
+    // 从 objModule->moduleVarName 中获得待导入的模块变量的索引
+    int index = getIndexFromSymbolTable(&objModule->moduleVarName, varName->value.start, varName->value.length);
+
+    // 如果索引为 -1，即模块变量 variableName 不存在，则向 vm->curThread->errorObj 添加错误信息并返回 NULL
+    if (index == -1) {
+        // 32 是下面 sprintf 中 fmt 中除 %s 的字符个数
+        ASSERT(varName->value.length < 512 - 32, "id`s buffer not big enough!");
+        ObjString *modName = VALUE_TO_OBJSTR(moduleName);
+        char id[512] = {'\0'};
+        int len = sprintf(id, "variable \'%s\' is not in module \'%s\'!", varName->value.start, modName->value.start);
+        vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, id, len));
+        return VT_TO_VALUE(VT_NULL);
+    }
+
+    // 否则模块变量存在，直接返回对应的模块变量 variableName 的值
+    return objModule->moduleVarValue.datas[index];
+}
+
+// 从核心模块中获取名为 name 的类
+static Value getCoreClassValue(ObjModule *objModule, const char *name) {
+    int index = getIndexFromSymbolTable(&objModule->moduleVarName, name, strlen(name));
+    if (index == -1) {
+        char id[MAX_ID_LEN] = {'\0'};
+        memcpy(id, name, strlen(name));
+        RUN_ERROR("something wrong occur: missing core class \"%s\"!", id);
+    }
+    return objModule->moduleVarValue.datas[index];
+}
+
+// 执行名为 moduleName 代码为 moduleCode 的模块
+VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode) {
+    ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
+    return executeInstruction(vm, objThread);
+}
+
+// 向 table 中添加符号 symbol，并返回 symbol 对应在 table 的索引
+int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length) {
+    ASSERT(length != 0, "length of symbol is 0!");
+
+    String string;
+    string.str = ALLOCATE_ARRAY(vm, char, length + 1); // 申请内存，加 1 是为了添加结尾符 \0
+    memcpy(string.str, symbol, length);                // 将 symbol 内容拷贝到 string.str 上
+    string.str[length] = '\0';
+    string.length = length;
+    StringBufferAdd(vm, table, string); // 向 table 中塞入 string
+    return table->count - 1;
+}
+
+// 确保符号 symbol 已经添加到符号表 table 中，如果查找没有，则向其中添加
+int ensureSymbolExist(VM *vm, SymbolTable *table, const char *symbol, uint32_t length) {
+    // 先从 table 中查找 symbol
+    int symbolIndex = getIndexFromSymbolTable(table, symbol, length);
+
+    // 如果没找到·，则添加 symbol 到 table 中，然后返回其索引
+    if (symbolIndex == -1) {
+        return addSymbol(vm, table, symbol, length);
+    }
+    // 如果找到，则返回其索引
+    return symbolIndex;
+}
+
+// 在 objModule 模块中定义名为 name 的类
+static Class *defineClass(VM *vm, ObjModule *objModule, const char *name) {
+    // 创建类
+    Class *class = newRawClass(vm, name, 0);
+    // 将类作为普通变量在模块中定义
+    defineModuleVar(vm, objModule, name, strlen(name), OBJ_TO_VALUE(class));
+    return class;
+}
+
+// 绑定方法到指定类
+// 将方法 method 到类 class 的 methods 数组中，位置为 index
+void bindMethod(VM *vm, Class *class, uint32_t index, Method method) {
+    // 各类自己的 methods 数组和 vm->allMethodNames 长度保持一致，进而 vm->allMethodNames 中的方法名和各个类的 methods 数组对应方法体的索引值相等，
+    // 这样就可以通过相同的索引获取到方法体或者方法名
+    // 然而 vm->allMethodNames 只有一个，但会对应多个类，所以各个类的 methods 数组中的方法体数量必然会小于 vm->allMethodNames 中的方法名数量
+    // 为了保证一样长度，就需要将各个类的 methods 数组中无用的索引处用空占位填充
+    if (index > class->methods.count) {
+        Method emptyPad = {MT_NONE, {0}};
+        MethodBufferFillWrite(vm, &class->methods, emptyPad, index - class->methods.count + 1);
+    }
+
+    class->methods.datas[index] = method;
+}
+
+// 绑定 superClass 为 subClass 的基类
+// 即继承基类的属性个数和方法（通过复制实现）
+void bindSuperClass(VM *vm, Class *subClass, Class *superClass) {
+    subClass->superClass = subClass;
+
+    // 继承基类的属性个数
+    subClass->fieldNum = superClass->fieldNum;
+
+    // 继承基类的方法
+    uint32_t idx = 0;
+    while (idx < superClass->methods.count) {
+        bindMethod(vm, subClass, idx, superClass->methods.datas[idx]);
+        idx++;
+    }
+}
+
+//绑定 fn.call 的重载，同样一个函数的 call 方法支持 0～16 个参数
+static void bindFnOverloadCall(VM *vm, const char *sign) {
+    uint32_t index = ensureSymbolExist(vm, &vm->allMethodNames, sign, strlen(sign));
+    //构造 method
+    Method method = {MT_FN_CALL, {0}};
+    bindMethod(vm, vm->fnClass, index, method);
+}
 
 // 定义原生方法的返回值
 // 将 value 存储在 arg[0] 中
@@ -34,15 +583,6 @@ char *rootDir = NULL;
 #define RET_NULL RET_VALUE(VT_TO_VALUE(VT_NULL))
 #define RET_TRUE RET_VALUE(VT_TO_VALUE(VT_TRUE))
 #define RET_FALSE RET_VALUE(VT_TO_VALUE(VT_FALSE))
-
-// 设置线程报错
-// 返回 false 通知虚拟机当前线程已报错，该切换线程了
-#define SET_ERROR_FALSE(vmPtr, errMsg)                                 \
-    do {                                                               \
-        vmPtr->curThread->errorObj =                                   \
-            OBJ_TO_VALUE(newObjString(vmPtr, errMsg, strlen(errMsg))); \
-        return false;                                                  \
-    } while (0);
 
 // 绑定原生方法 func 到 classPtr 指向的类
 // 其中 methodName 为脚本中使用的方法名，func 为原生方法
@@ -1072,7 +1612,7 @@ static bool primSystemClock(VM *vm UNUSED, Value *args UNUSED) {
 // 启动 gc
 // 该方法是脚本中调用 System.gc() 所执行的原生方法，该方法为类方法
 static bool primSystemGC(VM *vm, Value *args) {
-    startGC(vm);
+    // startGC(vm);
     RET_NULL;
 }
 
@@ -1141,456 +1681,6 @@ static bool primSystemWriteString(VM *vm UNUSED, Value *args) {
 /**
  * 至此，原生方法定义部分结束
 **/
-
-// 读取源码文件的方法
-// path 为源码路径
-char *readFile(const char *path) {
-    //获取源码文件的句柄 file
-    FILE *file = fopen(path, "r");
-    if (file == NULL) {
-        IO_ERROR("Couldn't open file \"%s\"", path);
-    }
-
-    struct stat fileStat;
-    stat(path, &fileStat);
-    size_t fileSize = fileStat.st_size;
-
-    // 获取源码文件大小后，为源码字符串申请内存，多申请的1个字节是为了字符串结尾 \0
-    char *fileContent = (char *)malloc(fileSize + 1);
-    if (fileContent == NULL) {
-        MEM_ERROR("Couldn't allocate memory for reading file \"%s\".\n", path);
-    }
-
-    size_t numRead = fread(fileContent, sizeof(char), fileSize, file);
-    if (numRead < fileSize) {
-        IO_ERROR("Couldn't read file \"%s\"", path);
-    }
-    // 字符串要以 \0 结尾
-    fileContent[fileSize] = '\0';
-
-    fclose(file);
-    return fileContent;
-}
-
-// 将数字转换为字符串
-static ObjString *num2str(VM *vm, double num) {
-    // NaN 不是一个确定的值,因此 NaN 和 NaN 是不相等的
-    if (num != num) {
-        return newObjString(vm, "NaN", 3);
-    }
-
-    if (num == INFINITY) {
-        return newObjString(vm, "infinity", 8);
-    }
-
-    if (num == -INFINITY) {
-        return newObjString(vm, "-infinity", 9);
-    }
-
-    // 以下 24 字节的缓冲区足以容纳双精度到字符串的转换
-    char buf[24] = {'\0'};
-    int len = sprintf(buf, "%.14g", num);
-    return newObjString(vm, buf, len);
-}
-
-// 判断 arg 是否为字符串
-static bool validateString(VM *vm, Value arg) {
-    if (VALUE_IS_OBJSTR(arg)) {
-        return true;
-    }
-    SET_ERROR_FALSE(vm, "argument must be string!");
-}
-
-// 判断 arg 是否为函数
-static bool validateFn(VM *vm, Value arg) {
-    if (VALUE_TO_OBJCLOSURE(arg)) {
-        return true;
-    }
-    vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "argument must be a function!", 28));
-    return false;
-}
-
-//判断 arg 是否为数字
-static bool validateNum(VM *vm, Value arg) {
-    if (VALUE_IS_NUM(arg)) {
-        return true;
-    }
-    SET_ERROR_FALSE(vm, "argument must be number!");
-}
-
-// 判断 value 是否为整数
-static bool validateIntValue(VM *vm, double value) {
-    if (trunc(value) == value) {
-        return true;
-    }
-    SET_ERROR_FALSE(vm, "argument must be integer!");
-}
-
-// 判断 arg 是否为整数
-static bool validateInt(VM *vm, Value arg) {
-    // 首先得是数字
-    if (!validateNum(vm, arg)) {
-        return false;
-    }
-
-    // 再校验数值
-    return validateIntValue(vm, VALUE_TO_NUM(arg));
-}
-
-// 判断参数 index 是否是落在 [0, length) 之间的整数
-static uint32_t validateIndexValue(VM *vm, double index, uint32_t length) {
-    // 索引必须是整数，如果校验失败则返回 UINT32_MAX
-    // UINT32_MAX 是 32 为无符号数的最大值，即 5294967295，用十六进制表示就是 0xFFFFFFFF
-    if (!validateIntValue(vm, index)) {
-        return UINT32_MAX;
-    }
-
-    // 支持负数索引，负数是从后往前索引，转换其对应的正数索引
-    if (index < 0) {
-        index += length;
-    }
-
-    // 索引应该落在 [0, length)
-    if (index >= 0 && index < length) {
-        return (uint32_t)index;
-    }
-
-    // 执行到此说明超出范围
-    vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "index out of bound!", 19));
-    return UINT32_MAX;
-}
-
-// 校验 index 合法性
-static uint32_t validateIndex(VM *vm, Value index, uint32_t length) {
-    return validateIndexValue(vm, VALUE_TO_NUM(index), length);
-}
-
-// 校验 key 合法性
-static bool validateKey(VM *vm, Value arg) {
-    if (VALUE_IS_TRUE(arg) ||
-        VALUE_IS_FALSE(arg) ||
-        VALUE_IS_NULL(arg) ||
-        VALUE_IS_NUM(arg) ||
-        VALUE_IS_OBJSTR(arg) ||
-        VALUE_IS_OBJRANGE(arg) ||
-        VALUE_IS_CLASS(arg)) {
-        return true;
-    }
-    SET_ERROR_FALSE(vm, "key must be value type!");
-}
-
-// 基于码点 value 创建字符串
-static Value makeStringFromCodePoint(VM *vm, int value) {
-    uint32_t byteNum = getByteNumOfEncodeUtf8(value);
-    ASSERT(byteNum != 0, "utf8 encode bytes should be between 1 and 4!");
-
-    // +1是为了结尾的 '\0'
-    ObjString *objString = ALLOCATE_EXTRA(vm, ObjString, byteNum + 1);
-
-    if (objString == NULL) {
-        MEM_ERROR("allocate memory failed in runtime!");
-    }
-
-    initObjHeader(vm, &objString->objHeader, OT_STRING, vm->stringClass);
-    objString->value.length = byteNum;
-    objString->value.start[byteNum] = '\0';
-    encodeUtf8((uint8_t *)objString->value.start, value);
-
-    // 根据字符串对象中的值 objString->value 设置对应的哈希值给 objString->hashCode
-    hashObjString(objString);
-
-    return OBJ_TO_VALUE(objString);
-}
-
-// 用索引 index 处的字符创建字符串对象
-static Value stringCodePointAt(VM *vm, ObjString *objString, uint32_t index) {
-    ASSERT(index < objString->value.length, "index out of bound!");
-    int codePoint = decodeUtf8((uint8_t *)objString->value.start + index, objString->value.length - index);
-
-    // 若不是有效的 utf8 序列，将其处理为单个裸字符
-    if (codePoint == -1) {
-        return OBJ_TO_VALUE(newObjString(vm, &objString->value.start[index], 1));
-    }
-
-    return makeStringFromCodePoint(vm, codePoint);
-}
-
-// 计算 objRange 中元素的起始索引及索引方向
-// countPtr 指针指向存储 objRange 所能索引的元素个数的变量
-// directionPtr 指针指向存储 objRange 索引方向的变量（-1 表示反向，索引递减；1 表示正向，索引递增）
-static uint32_t calculateRange(VM *vm, ObjRange *objRange, uint32_t *countPtr, int *directionPtr) {
-    uint32_t from = validateIndexValue(vm, objRange->from, *countPtr);
-    if (from == UINT32_MAX) {
-        return UINT32_MAX;
-    }
-
-    uint32_t to = validateIndexValue(vm, objRange->to, *countPtr);
-    if (to == UINT32_MAX) {
-        return UINT32_MAX;
-    }
-
-    //如果 from 和 to 为负值,经过 validateIndexValue 已经变成了相应的正索引
-    // -1 表示反向，索引递减；1 表示正向，索引递增
-    *directionPtr = from < to ? 1 : -1;
-    // countPtr 指针指向存储 objRange 所能索引的元素个数的变量
-    *countPtr = abs((int)(from - to)) + 1;
-    return from;
-}
-
-// 按照 UTF-8 编码【从 sourceStr 中起始为 startIndex，方向为 direction 的 count 个字符】
-static ObjString *newObjStringFromSub(VM *vm, ObjString *sourceStr, int startIndex, uint32_t count, int direction) {
-    uint8_t *source = (uint8_t *)sourceStr->value.start;
-    uint32_t totalLength = 0, idx = 0;
-
-    // 计算没有 UTF-8 编码的字符的 UTF-8 编码字节数，以便后面申请内存空间
-    while (idx < count) {
-        totalLength += getByteNumOfDecodeUtf8(source[startIndex + idx * direction]);
-        idx++;
-    }
-
-    // +1 是为了结尾的 '\0'
-    ObjString *result = ALLOCATE_EXTRA(vm, ObjString, totalLength + 1);
-
-    if (result == NULL) {
-        MEM_ERROR("allocate memory failed in runtime!");
-    }
-    initObjHeader(vm, &result->objHeader, OT_STRING, vm->stringClass);
-    result->value.start[totalLength] = '\0';
-    result->value.length = totalLength;
-
-    uint8_t *dest = (uint8_t *)result->value.start;
-    idx = 0;
-    while (idx < count) {
-        int index = startIndex + idx * direction;
-        // 先调用 decodeUtf8 获得字符的码点
-        int codePoint = decodeUtf8(source + index, sourceStr->value.length - index);
-        if (codePoint != -1) {
-            // 然后调用 encodeUtf8 将码点按照 UTF-8 编码，并写入dest 即 result
-            dest += encodeUtf8(dest, codePoint);
-        }
-        idx++;
-    }
-
-    // 根据字符串对象中的值 result->value 设置对应的哈希值给 result->hashCode
-    hashObjString(result);
-    return result;
-}
-
-// 使用 Boyer-Moore-Horspool 字符串匹配算法在 haystack 中查找 needle
-static int findString(ObjString *haystack, ObjString *needle) {
-    // 如果待查找的 patten 为空则为找到，直接返回 0 即可
-    if (needle->value.length == 0) {
-        //返回起始下标 0
-        return 0;
-    }
-
-    // 若待搜索的字符串比原串还长，肯定搜不到，直接返回 -1 即可
-    if (needle->value.length > haystack->value.length) {
-        return -1;
-    }
-
-    // 构建 “bad-character shift表” 以确定窗口滑动的距离
-    // 数组 shift 的值便是滑动距离
-    uint32_t shift[UINT8_MAX];
-    // needle 中最后一个字符的下标
-    uint32_t needleEnd = needle->value.length - 1;
-
-    // 一、先假定 “bad character” 不属于 needle(即 pattern)
-    // 对于这种情况，滑动窗口跨过整个 needle
-    uint32_t idx = 0;
-    while (idx < UINT8_MAX) {
-        // 默认为滑过整个 needle 的长度
-        shift[idx] = needle->value.length;
-        idx++;
-    }
-
-    // 二、假定 haystack 中与 needle 不匹配的字符在 needle 中之前已匹配过的位置出现过
-    // 就滑动窗口以使该字符与在needle中匹配该字符的最末位置对齐。
-    // 这里预先确定需要滑动的距离
-    idx = 0;
-    while (idx < needleEnd) {
-        char c = needle->value.start[idx];
-        // idx 从前往后遍历 needle，当 needle 中有重复的字符 c 时，
-        // 后面的字符 c 会覆盖前面的同名字符 c，这保证了数组 shilf 中字符是 needle 中最末位置的字符，
-        // 从而保证了 shilf[c] 的值是 needle中 最末端同名字符与 needle 末端的偏移量
-        shift[(uint8_t)c] = needleEnd - idx;
-        idx++;
-    }
-
-    // Boyer-Moore-Horspool 是从后往前比较，这是处理 bad-character 高效的地方，
-    // 因此获取 needle 中最后一个字符，用于同 haystack 的窗口中最后一个字符比较
-    char lastChar = needle->value.start[needleEnd];
-
-    // 长度差便是滑动窗口的滑动范围
-    uint32_t range = haystack->value.length - needle->value.length;
-
-    // 从 haystack 中扫描 needle，寻找第 1 个匹配的字符，如果遍历完了就停止
-    idx = 0;
-    while (idx <= range) {
-        // 拿 needle 中最后一个字符同 haystack 窗口的最后一个字符比较
-        //（因为Boyer-Moore-Horspool是从后往前比较），如果匹配，看整个 needle 是否匹配
-        char c = haystack->value.start[idx + needleEnd];
-        if (lastChar == c &&
-            memcmp(haystack->value.start + idx, needle->value.start, needleEnd) == 0) {
-            // 找到了就返回匹配的位置
-            return idx;
-        }
-
-        // 否则就向前滑动继续下一伦比较
-        idx += shift[(uint8_t)c];
-    }
-
-    // 未找到就返回 -1
-    return -1;
-}
-
-// 根据模块名获取文件绝对路径
-// 拼接规则：rootDir + modileName + '.di'
-static char *getFilePath(const char *moduleName) {
-    uint32_t rootDirLength = rootDir == NULL ? 0 : strlen(rootDir);
-    uint32_t nameLength = strlen(moduleName);
-    uint32_t pathLength = rootDirLength + nameLength + strlen(".di");
-    char *path = (char *)malloc(pathLength + 1);
-
-    if (rootDir != NULL) {
-        memmove(path, rootDir, rootDirLength);
-    }
-
-    memmove(path + rootDirLength, moduleName, nameLength);
-    memmove(path + rootDirLength + nameLength, ".di", 3);
-    path[pathLength] = '\0';
-    return path;
-}
-
-// 读取名为 moduleName 的模块
-static char *readModule(const char *moduleName) {
-    char *modulePath = getFilePath(moduleName);
-    char *moduleCode = readFile(modulePath);
-    free(modulePath);
-    return moduleCode;
-}
-
-// 输出字符串
-static void printString(const char *str) {
-    printf("%s", str);
-    // 输出到缓冲区后立即刷新
-    fflush(stdout);
-}
-
-// 导入模块 moduleName，主要是把编译模块并加载到 vm->allModules
-static Value importModule(VM *vm, Value moduleName) {
-    // 若模块已经导入则返回 NULL
-    if (!VALUE_IS_UNDEFINED(mapGet(vm->allModules, moduleName))) {
-        return VT_TO_VALUE(VT_NULL);
-    }
-    ObjString *objString = VALUE_TO_OBJSTR(moduleName);
-    // 读取名为 moduleName 的模块
-    const char *sourceCode = readModule(objString->value.start);
-
-    // 加载名为 moduleName 的模块并进行编译
-    ObjThread *moduleThread = loadModule(vm, moduleName, sourceCode);
-    return OBJ_TO_VALUE(moduleThread);
-}
-
-// 从模块 moduleName 中获取模块变量 variableName
-static Value getModuleVariable(VM *vm, Value moduleName, Value variableName) {
-    // 调用本函数前模块应该提前被加载
-    // 也就是导入模块变量之前需要导入模块，在执行本函数之前，必须先执行 importModule 函数将整个模块加载进来
-    // 所以编译 “import 模块 for 模块变量” 会先生成调用 importModule 函数的指令，再生成调用 getModuleVariable 函数的指令获取模块中某个模块变量
-    ObjModule *objModule = getModule(vm, moduleName);
-
-    // 如果模块没有被提前加载，则向 vm->curThread->errorObj 添加错误信息并返回 NULL
-    if (objModule == NULL) {
-        ObjString *modName = VALUE_TO_OBJSTR(moduleName);
-        // 24 是下面 sprintf 中 fmt 中除 %s 的字符个数
-        ASSERT(modName->value.length < 512 - 24, "id`s buffer not big enough!");
-        char id[512] = {'\0'};
-        int len = sprintf(id, "module \'%s\' is not loaded!", modName->value.start);
-        vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, id, len));
-        return VT_TO_VALUE(VT_NULL);
-    }
-
-    ObjString *varName = VALUE_TO_OBJSTR(variableName);
-
-    // 从 objModule->moduleVarName 中获得待导入的模块变量的索引
-    int index = getIndexFromSymbolTable(&objModule->moduleVarName, varName->value.start, varName->value.length);
-
-    // 如果索引为 -1，即模块变量 variableName 不存在，则向 vm->curThread->errorObj 添加错误信息并返回 NULL
-    if (index == -1) {
-        // 32 是下面 sprintf 中 fmt 中除 %s 的字符个数
-        ASSERT(varName->value.length < 512 - 32, "id`s buffer not big enough!");
-        ObjString *modName = VALUE_TO_OBJSTR(moduleName);
-        char id[512] = {'\0'};
-        int len = sprintf(id, "variable \'%s\' is not in module \'%s\'!", varName->value.start, modName->value.start);
-        vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, id, len));
-        return VT_TO_VALUE(VT_NULL);
-    }
-
-    // 否则模块变量存在，直接返回对应的模块变量 variableName 的值
-    return objModule->moduleVarValue.datas[index];
-}
-
-// 从核心模块中获取名为 name 的类
-static Value getCoreClassValue(ObjModule *objModule, const char *name) {
-    int index = getIndexFromSymbolTable(&objModule->moduleVarName, name, strlen(name));
-    if (index == -1) {
-        char id[MAX_ID_LEN] = {'\0'};
-        memcpy(id, name, strlen(name));
-        RUN_ERROR("something wrong occur: missing core class \"%s\"!", id);
-    }
-    return objModule->moduleVarValue.datas[index];
-}
-
-// 从 vm->allModules 中获取名为 moduleName 的模块
-static ObjModule *getModule(VM *vm, Value moduleName) {
-    Value value = mapGet(vm->allModules, moduleName);
-
-    if (value.type == VT_UNDEFINED) {
-        return NULL;
-    }
-    return VALUE_TO_OBJMODULE(value);
-}
-
-// 加载名为 moduleName 的模块并进行编译
-static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode) {
-    // 先在 vm->allModules 中查找是否存在 moduleName
-    // 如果存在，说明对应模块已经加载，以避免重复加载
-    ObjModule *module = getModule(vm, moduleName);
-
-    // 否则需要先加载模块，且该模块需要继承核心模块中的变量
-    if (module == NULL) {
-        // 创建模块并添加到 vm->allModules
-        ObjString *modName = VALUE_TO_OBJSTR(moduleName);
-        ASSERT(modName->value.start[modName->value.length] == = '\0', "string.value.start is not terminated!");
-        // 创建模块名为 modName 的模块对象
-        module = newObjModule(vm, modName);
-        // 将名为 moduleName 的模块加载到 vm->allModules
-        mapSet(vm, vm->allModules, moduleName, OBJ_TO_VALUE(module));
-
-        // 继承核心模块中变量，即将核心模块中的变量也拷贝到该模块中
-        // TODO: 待后续解释
-        ObjModule *coreModule = getModule(vm, CORE_MODULE);
-        uint32_t idx = 0;
-        while (idx < coreModule->moduleVarName.count) {
-            defineModuleVar(vm, module,
-                            coreModule->moduleVarName.datas[idx].str,
-                            coreModule->moduleVarName.datas[idx].length,
-                            coreModule->moduleVarValue.datas[idx]);
-            idx++;
-        }
-    }
-
-    ObjFn *fn = compileModule(vm, module, moduleCode);
-    // 单独创建一个线程运行编译后的模块
-    ObjClosure *objClosure = newObjClosure(vm, fn);
-    ObjThread *objThread = newObjThread(vm, objClosure);
-}
-
-// 执行名为 moduleName 代码为 moduleCode 的模块
-VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode) {
-    ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
-    return executeInstruction(vm, objThread);
-}
 
 // 编译核心模块
 void buildCore(VM *vm) {
@@ -1805,93 +1895,4 @@ void buildCore(VM *vm) {
         }
         objHeader = objHeader->next;
     }
-}
-
-// 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
-int getIndexFromSymbolTable(SymbolTable *table, const char *symbol, uint32_t length) {
-    ASSERT(length != 0, "length of symbol is 0!");
-    uint32_t index = 0;
-    // 遍历 table->data，找到与 symbol 相等的，然后返回该索引值
-    while (index < table->count) {
-        if (length == table->datas[index].length == length && memcmp(table->datas[index].str, symbol, length) == 0) {
-            return index;
-        }
-        index++;
-    }
-    // 找不到则返回 -1
-    return -1;
-}
-
-// 向 table 中添加符号 symbol，并返回 symbol 对应在 table 的索引
-int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length) {
-    ASSERT(length != 0, "length of symbol is 0!");
-
-    String string;
-    string.str = ALLOCATE_ARRAY(vm, char, length + 1); // 申请内存，加 1 是为了添加结尾符 \0
-    memcpy(string.str, symbol, length);                // 将 symbol 内容拷贝到 string.str 上
-    string.str[length] = '\0';
-    string.length = length;
-    StringBufferAdd(vm, table, string); // 向 table 中塞入 string
-    return table->count - 1;
-}
-
-// 确保符号 symbol 已经添加到符号表 table 中，如果查找没有，则向其中添加
-int ensureSymbolExist(VM *vm, SymbolTable *table, const char *symbol, uint32_t length) {
-    // 先从 table 中查找 symbol
-    int symbolIndex = getIndexFromSymbolTable(table, symbol, length);
-
-    // 如果没找到·，则添加 symbol 到 table 中，然后返回其索引
-    if (symbolIndex == -1) {
-        return addSymbol(vm, table, symbol, length);
-    }
-    // 如果找到，则返回其索引
-    return symbolIndex;
-}
-
-// 在 objModule 模块中定义名为 name 的类
-static Class *defineClass(VM *vm, ObjModule *objModule, const char *name) {
-    // 创建类
-    Class *class = newRawClass(vm, name, 0);
-    // 将类作为普通变量在模块中定义
-    defineModuleVar(vm, objModule, name, strlen(name), OBJ_TO_VALUE(class));
-    return class;
-}
-
-// 绑定方法到指定类
-// 将方法 method 到类 class 的 methods 数组中，位置为 index
-void bindMethod(VM *vm, Class *class, uint32_t index, Method method) {
-    // 各类自己的 methods 数组和 vm->allMethodNames 长度保持一致，进而 vm->allMethodNames 中的方法名和各个类的 methods 数组对应方法体的索引值相等，
-    // 这样就可以通过相同的索引获取到方法体或者方法名
-    // 然而 vm->allMethodNames 只有一个，但会对应多个类，所以各个类的 methods 数组中的方法体数量必然会小于 vm->allMethodNames 中的方法名数量
-    // 为了保证一样长度，就需要将各个类的 methods 数组中无用的索引处用空占位填充
-    if (index > class->methods.count) {
-        Method emptyPad = {MT_NONE, {0}};
-        MethodBufferFillWrite(vm, &class->methods, emptyPad, index - class->methods.count + 1);
-    }
-
-    class->methods.datas[index] = method;
-}
-
-// 绑定 superClass 为 subClass 的基类
-// 即继承基类的属性个数和方法（通过复制实现）
-void bindSuperClass(VM *vm, Class *subClass, Class *superClass) {
-    subClass->superClass = subClass;
-
-    // 继承基类的属性个数
-    subClass->fieldNum = superClass->fieldNum;
-
-    // 继承基类的方法
-    uint32_t idx = 0;
-    while (idx < superClass->methods.count) {
-        bindMethod(vm, subClass, idx, superClass->methods.datas[idx]);
-        idx++;
-    }
-}
-
-//绑定 fn.call 的重载，同样一个函数的 call 方法支持 0～16 个参数
-static void bindFnOverloadCall(VM *vm, const char *sign) {
-    uint32_t index = ensureSymbolExist(vm, &vm->allMethodNames, sign, strlen(sign));
-    //构造 method
-    Method method = {MT_FN_CALL, {0}};
-    bindMethod(vm, vm->fnClass, index, method);
 }

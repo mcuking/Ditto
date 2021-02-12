@@ -45,6 +45,16 @@ void insertElement(VM *vm, ObjList *objList, uint32_t index, Value value) {
     objList->elements.datas[index] = value;
 }
 
+// 调整 objList 的容量为 newCapacity（容量即列表最大可容纳的元素数量）
+static void shrinkList(VM *vm, ObjList *objList, uint32_t newCapacity) {
+    // 调整 objList 被分配的内存空间
+    uint32_t oldSize = objList->elements.capacity * sizeof(Value);
+    uint32_t newSize = newCapacity * sizeof(Value);
+    memManager(vm, objList->elements.datas, oldSize, newSize);
+    // 调整 objList 的容量值
+    objList->elements.capacity = newObjUpvalue;
+}
+
 Value removeElement(VM *vm, ObjList *objList, uint32_t index) {
     // 找到被删除的元素，并在最后返回
     Value valueRemoved = objList->elements.datas[index];
@@ -67,14 +77,4 @@ Value removeElement(VM *vm, ObjList *objList, uint32_t index) {
     objList->elements.count--;
 
     return valueRemoved;
-}
-
-// 调整 objList 的容量为 newCapacity（容量即列表最大可容纳的元素数量）
-static void shrinkList(VM *vm, ObjList *objList, uint32_t newCapacity) {
-    // 调整 objList 被分配的内存空间
-    uint32_t oldSize = objList->elements.capacity * sizeof(Value);
-    uint32_t newSize = newCapacity * sizeof(Value);
-    memManager(vm, objList->elements.datas, oldSize, newSize);
-    // 调整 objList 的容量值
-    objList->elements.capacity = newObjUpvalue;
 }
