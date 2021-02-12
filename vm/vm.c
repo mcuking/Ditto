@@ -227,7 +227,7 @@ static void patchOperand(Class *class, ObjFn *fn) {
             case OPCODE_LOAD_FIELD:
             case OPCODE_STORE_FIELD:
             case OPCODE_LOAD_THIS_FIELD:
-            case OPCODE_STORE_THIS_FIELD:
+            case OPCODE_STORE_THIS_FIELD: {
                 // 子类的实例属性数量 = 子类本身的实例属性数量 + 基类本身的实例属性数量
                 // 当编译子类时，基类可能还未编译，所以需要等到编译阶段完全结束后，
                 // 在子类本身的实例属性数量的基础上在加上基类本身的实例属性数量
@@ -236,6 +236,7 @@ static void patchOperand(Class *class, ObjFn *fn) {
                 // 指向下一个操作码
                 ip++;
                 break;
+            }
 
             case OPCODE_SUPER0:
             case OPCODE_SUPER1:
@@ -253,7 +254,7 @@ static void patchOperand(Class *class, ObjFn *fn) {
             case OPCODE_SUPER13:
             case OPCODE_SUPER14:
             case OPCODE_SUPER15:
-            case OPCODE_SUPER16:
+            case OPCODE_SUPER16: {
                 // 操作码 OPCODE_SUPERx 用于调用基类的方法的
                 // 其操作数有 4 个字节，其中前两个字节存储 基类方法在基类中的索引 methodIndex，即 super.method[methodIndex] 表示基类的方法
                 // 后两个字节存储 基类在常量表中的索引 superClassIndex，即 constants[superClassIndex] 表示基类
@@ -273,8 +274,9 @@ static void patchOperand(Class *class, ObjFn *fn) {
                 // 再跳过操作数的后两个字节（用于存储 基类在常量表中的索引 superClassIndex），指向下一个操作码
                 ip += 2;
                 break;
+            }
 
-            case OPCODE_CREATE_CLOSURE:
+            case OPCODE_CREATE_CLOSURE: {
                 // 操作码 OPCODE_CREATE_CLOSURE 的操作数为：前两个字节（用于存储待创建闭包的函数在常量表中索引）+ 不定字节数（用于存储形式为 {upvalue 是否是直接编译外层单元的局部变量，upvalue 在直接外层编译单元的索引} 的成对信息）
                 // 具体细节请参考函数 endCompileUnit 中的注释
 
@@ -287,6 +289,7 @@ static void patchOperand(Class *class, ObjFn *fn) {
                 // 通过 getBytesOfOperands 获取到某个操作码 OPCODE_CREATE_CLOSURE 的操作数占用的字节数
                 ip += getBytesOfOperands(fn->instrStream.datas, fn->constants.datas, ip - 1);
                 break;
+            }
 
             case OPCODE_END:
                 // 遇到操作码 OPCODE_END，表示字节码已经结束，直接退出即可
