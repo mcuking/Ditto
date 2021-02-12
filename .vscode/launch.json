@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/di",
             "args": [
-                "./examples/sample.di"
+                "./examples/manager.di"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
