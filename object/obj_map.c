@@ -2,7 +2,6 @@
 #include "class.h"
 #include "obj_range.h"
 #include "obj_string.h"
-#include "vm.h"
 
 // 新建 map 对象
 ObjMap *newObjMap(VM *vm) {
@@ -50,7 +49,7 @@ static uint32_t hashObj(ObjHeader *objHeader) {
             return hashString(class->name->value.start, class->name->value.length);
         }
         default:
-            RUN_ERROR("the hashable needs be objstring, objrange and class.");
+            RUN_ERROR("the hashable needs be objString, objRange and class.");
     }
     return 0;
 }
@@ -60,21 +59,16 @@ static uint32_t hashValue(Value value) {
     switch (value.type) {
         case VT_FALSE:
             return 0;
-            break;
         case VT_NULL:
             return 1;
-            break;
         case VT_TRUE:
             return 2;
-            break;
         case VT_NUM:
             return hashNum(value.num);
-            break;
         case VT_OBJ:
             return hashObj(value.objHeader);
-            break;
         default:
-            RUN_ERROR("unsupport type dashed!");
+            RUN_ERROR("Not support type dashed!");
     }
     return 0;
 }
@@ -189,7 +183,7 @@ static void resizeMap(VM *vm, ObjMap *objMap, uint32_t newCapacity) {
 void mapSet(VM *vm, ObjMap *objMap, Value key, Value value) {
     // 如果新增一个 entry 后，容量利用率超过 80 % 时，就需要扩容
     if (objMap->count + 1 > objMap->capacity * MAP_LOAD_PERCENT) {
-        uint32_t newCapacity = objMap->capacity * CAPACIRY_GROW_FACTOR; // 新空间为到旧空间的 4 倍
+        uint32_t newCapacity = objMap->capacity * CAPACITY_GROW_FACTOR; // 新空间为到旧空间的 4 倍
         // 如果小于容量最小值 64，则按照最小值设置
         if (newCapacity < MIN_CAPACITY) {
             newCapacity = MIN_CAPACITY;
@@ -238,8 +232,8 @@ Value removeKey(VM *vm, ObjMap *objMap, Value key) {
         clearMap(vm, objMap);
     }
     // 如果删除后实际使用槽位 slot 数量小于容量的 1 / 4 的 80%，且实际使用量仍大于规定的最小容量，则缩小容量
-    else if ((objMap->count < objMap->capacity / CAPACIRY_GROW_FACTOR * MAP_LOAD_PERCENT) && objMap->count > MIN_CAPACITY) {
-        uint32_t newCapacity = objMap->capacity / CAPACIRY_GROW_FACTOR;
+    else if ((objMap->count < objMap->capacity / CAPACITY_GROW_FACTOR * MAP_LOAD_PERCENT) && objMap->count > MIN_CAPACITY) {
+        uint32_t newCapacity = objMap->capacity / CAPACITY_GROW_FACTOR;
 
         // 如果缩小的新容量小于最小容量，则设置为最小容量
         if (newCapacity < MIN_CAPACITY) {

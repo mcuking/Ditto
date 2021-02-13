@@ -78,7 +78,7 @@ void errorReport(void *lexer, ErrorType errorType, const char *fmt, ...) {
             fprintf(stderr, "%s\n", buffer);
             break;
         default:
-            NOT_REACHED();
+            NOT_REACHED
     }
     exit(1);
 }

@@ -66,15 +66,15 @@ typedef struct loop {
 } Loop;
 
 // 定义 ClassBookKeep 结构（用于记录类编译时的信息）
-// 注：每定义一个方法，就将这个方法在 vm->allMethodNames 中的索引 index 写入到 instantMethods 或 staticMehthods 中，
-// 在写入之前先检查下 instantMethods 或 staticMehthods 是否已经存在 index，如果存在则报错重复定义，否则直接写入
+// 注：每定义一个方法，就将这个方法在 vm->allMethodNames 中的索引 index 写入到 instantMethods 或 staticMethods 中，
+// 在写入之前先检查下 instantMethods 或 staticMethods 是否已经存在 index，如果存在则报错重复定义，否则直接写入
 typedef struct
 {
     ObjString *name;          // 类名
     SymbolTable fields;       // 类的属性符号表（只包含实例属性，不包括类的静态属性）
     bool isStatic;            // 当前编译静态方法则为真
     IntBuffer instantMethods; // 实例方法的集合，只保存方法对应的索引，不保存方法体
-    IntBuffer staticMehthods; // 静态方法的集合，只保存方法对应的索引，不保存方法体
+    IntBuffer staticMethods; // 静态方法的集合，只保存方法对应的索引，不保存方法体
     Signature *signature;     // 当前正在编译的方法的签名
 } ClassBookKeep;
 
@@ -88,6 +88,6 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t len
 ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode);
 
 // 获取 ip 所指向的操作码的操作数占用的字节数
-uint32_t getBytesOfOperands(Byte *instrStream, Value *constants, int ip);
+uint32_t getBytesOfOperands(const Byte *instrStream, Value *constants, int ip);
 
 #endif

@@ -1,7 +1,6 @@
 #include "meta_obj.h"
 #include "class.h"
 #include "obj_string.h"
-#include "vm.h"
 #include <string.h>
 
 // 新建模块对象

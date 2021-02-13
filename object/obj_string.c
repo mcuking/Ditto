@@ -1,11 +1,10 @@
 #include "obj_string.h"
 #include "common.h"
-#include "util.h"
 #include "vm.h"
 #include <string.h>
 
 // 将字符串值根据 fnv-1a 算法转成对应哈希值
-uint32_t hashString(char *str, uint32_t length) {
+uint32_t hashString(const char *str, uint32_t length) {
     uint32_t hashCode = 2166136261, idx = 0;
     while (idx < length) {
         hashCode ^= str[idx];

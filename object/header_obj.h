@@ -36,8 +36,7 @@ typedef enum {
 
 // 通用的值结构
 // 可以表示所有类型的值
-typedef struct
-{
+typedef struct {
     // union 中的值由 type 的值决定
     ValueType type; // 值类型
     union {

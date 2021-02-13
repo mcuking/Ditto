@@ -1,6 +1,5 @@
 #include "header_obj.h"
 #include "class.h"
-#include "vm.h"
 
 // TODO: 待后续解释
 DEFINE_BUFFER_METHOD(Value)

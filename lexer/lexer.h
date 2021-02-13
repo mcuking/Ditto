@@ -75,8 +75,8 @@ typedef enum {
     //关系操作符
     TOKEN_EQUAL,        // '=='
     TOKEN_NOT_EQUAL,    // '!='
-    TOKEN_GREATE,       // '>'
-    TOKEN_GREATE_EQUAL, // '>='
+    TOKEN_GREAT,       // '>'
+    TOKEN_GREAT_EQUAL, // '>='
     TOKEN_LESS,         // '<'
     TOKEN_LESS_EQUAL,   // '<='
 
@@ -121,9 +121,6 @@ bool matchToken(Lexer *lexer, TokenType expectTokenType);
 
 // 断言当前 token 类型为期望类型，并读取下一个 token，否则报错
 void assertCurToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg);
-
-// 断言下一个 token 类型为期望类型，否则报错
-void assertNextToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg);
 
 // 初始化词法分析器
 void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode, ObjModule *objModule);

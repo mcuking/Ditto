@@ -80,7 +80,6 @@ uint8_t encodeUtf8(uint8_t *buf, int value) {
         *buf = 0x80 | (value & 0x3f);
         return 4;
     } else {
-        NOT_REACHED();
         return 0; // 超出范围返回 0
     }
 }

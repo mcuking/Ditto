@@ -3,7 +3,7 @@
 #include "obj_fn.h"
 
 // 定义线程对象结构
-typedef struct {
+typedef struct objThread {
     ObjHeader objHeader;
 
     Value *stack;           // 函数运行时栈的栈底
@@ -28,6 +28,6 @@ void prepareFrame(ObjThread *objThread, ObjClosure *objClosure, Value *stackStar
 void resetThread(ObjThread *objThread, ObjClosure *objClosure);
 
 // 新建线程对象，线程中运行的是闭包 objClosure 中的函数
-ObjHeader *newObjThread(VM *vm, ObjClosure *objClosure);
+ObjThread *newObjThread(VM *vm, ObjClosure *objClosure);
 
 #endif

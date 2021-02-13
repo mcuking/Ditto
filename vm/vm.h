@@ -21,7 +21,7 @@ typedef enum {
 
 // 虚拟机执行结果
 typedef enum vmResult {
-    VM_RESULT_SUCESS,
+    VM_RESULT_SUCCESS,
     VM_RESULT_ERROR
 } VMResult;
 

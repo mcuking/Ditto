@@ -23,7 +23,7 @@ typedef struct {
 } FnDebug;
 
 // 定义自由变量 upvalue 对象的结构体
-typedef struct {
+typedef struct upvalue {
     ObjHeader objHeader;
     // 该指针用于指向对应的自由变量 upvalue，以供内部函数访问
     Value *localVarPtr;

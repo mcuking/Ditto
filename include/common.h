@@ -37,7 +37,7 @@ typedef struct class Class;
 
 // 宏 NOT_REACHED 表示 “不可能到达”
 // 用于一些程序中不能被执行到的地方，说明程序出错了
-#define NOT_REACHED()                                            \
+#define NOT_REACHED                                              \
     do {                                                         \
         fprintf(stderr, "NOT_REACHED: %s:%d In function %s()\n", \
                 __FILE__, __LINE__, __func__);                   \

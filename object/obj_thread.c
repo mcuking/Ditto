@@ -1,6 +1,5 @@
 #include "obj_thread.h"
 #include "class.h"
-#include "vm.h"
 
 // 为线程 objThread 中运行的闭包函数 objClosure 准备堆栈框架，即闭包（函数或方法）的运行资源，包括如下：
 // 1.运行时栈    2.待运行的指令流    3.当前运行的指令地址 ip
@@ -37,7 +36,7 @@ void resetThread(ObjThread *objThread, ObjClosure *objClosure) {
 }
 
 // 新建线程对象，线程中运行的是闭包 objClosure 中的函数
-ObjHeader *newObjThread(VM *vm, ObjClosure *objClosure) {
+ObjThread *newObjThread(VM *vm, ObjClosure *objClosure) {
     // 闭包 objClosure 为空则报错
     ASSERT(objClosure != NULL, "objClosure is NULL");
 
