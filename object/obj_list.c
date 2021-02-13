@@ -52,7 +52,7 @@ static void shrinkList(VM *vm, ObjList *objList, uint32_t newCapacity) {
     uint32_t newSize = newCapacity * sizeof(Value);
     memManager(vm, objList->elements.datas, oldSize, newSize);
     // 调整 objList 的容量值
-    objList->elements.capacity = newObjUpvalue;
+    objList->elements.capacity = newCapacity;
 }
 
 Value removeElement(VM *vm, ObjList *objList, uint32_t index) {
@@ -66,9 +66,9 @@ Value removeElement(VM *vm, ObjList *objList, uint32_t index) {
         idx++;
     }
 
-    // 宏 CAPACIRY_GROW_FACTOR 为 4
+    // 宏 CAPACITY_GROW_FACTOR 为 4
     // 当列表中元素实际使用空间不足列表容量的 1/4 时，就调用 shrinkList 函数调整列表容量
-    uint32_t _capacity = objList->elements.capacity / CAPACIRY_GROW_FACTOR;
+    uint32_t _capacity = objList->elements.capacity / CAPACITY_GROW_FACTOR;
     if (_capacity > objList->elements.count) {
         shrinkList(vm, objList, _capacity);
     }

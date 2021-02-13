@@ -4,7 +4,6 @@
 #include "core.h"
 #include "obj_range.h"
 #include "string.h"
-#include "vm.h"
 
 // TODO: 待后续解释
 DEFINE_BUFFER_METHOD(Method)
@@ -39,7 +38,7 @@ bool valueIsEqual(Value a, Value b) {
         ObjString *strA = VALUE_TO_OBJSTR(a);
         ObjString *strB = VALUE_TO_OBJSTR(b);
 
-        return (strA->value.length == strB->value.length && memcmp(strA->value.start, strB->value.start, strA->value.length));
+        return (strA->value.length == strB->value.length && memcmp(strA->value.start, strB->value.start, strA->value.length) == 0);
     }
 
     // 若为 range 对象，则比较两个对象的 from / to 值
@@ -117,7 +116,6 @@ Class *getClassOfObj(VM *vm, Value object) {
         case VT_OBJ:
             return VALUE_TO_OBJ(object)->class;
         default:
-            NOT_REACHED();
+            NOT_REACHED
     }
-    return NULL;
 }

@@ -3,8 +3,7 @@
 #include "obj_string.h"
 
 // 定义模块对象结构
-typedef struct
-{
+typedef struct {
     ObjString *name; // 模块名称
     ObjHeader objHeader;
     SymbolTable moduleVarName;  // 模块中定义的全局变量名

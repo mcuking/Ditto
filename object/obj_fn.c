@@ -1,6 +1,5 @@
 #include "class.h"
 #include "meta_obj.h"
-#include "vm.h"
 
 // 新建自由变量对象
 // localVarPtr 是外部函数的局部变量在运行时栈的地址

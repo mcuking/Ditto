@@ -5,7 +5,6 @@
 #include "unicodeUtf8.h"
 #include "utils.h"
 #include <ctype.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -139,7 +138,7 @@ static void skipComment(Lexer *lexer) {
         } else {
             // 如果下一个字符是 \0，则报错
             LEX_ERROR(lexer, "expect '*/' before comment end!");
-        };
+        }
     }
     // 注释之后可能会有空白符
     skipBlanks(lexer);
@@ -294,7 +293,7 @@ static void lexString(Lexer *lexer) {
                     ByteBufferAdd(lexer->vm, &str, '\\');
                     break;
                 default:
-                    LEX_ERROR(lexer, "unsupport eacape \\%c", lexer->curChar);
+                    LEX_ERROR(lexer, "Not support eacape \\%c", lexer->curChar);
                     break;
             }
         } else {
@@ -475,11 +474,11 @@ void getNextToken(Lexer *lexer) {
                 break;
             case '>':
                 if (matchNextChar(lexer, '=')) {
-                    lexer->curToken.type = TOKEN_GREATE_EQUAL;
+                    lexer->curToken.type = TOKEN_GREAT_EQUAL;
                 } else if (matchNextChar(lexer, '>')) {
                     lexer->curToken.type = TOKEN_BIT_SHIFT_RIGHT;
                 } else {
-                    lexer->curToken.type = TOKEN_GREATE;
+                    lexer->curToken.type = TOKEN_GREAT;
                 }
                 break;
             case '"':
@@ -522,7 +521,7 @@ void getNextToken(Lexer *lexer) {
                 } else if (isdigit(lexer->curChar)) {
                     lexNum(lexer);
                 } else {
-                    LEX_ERROR(lexer, "unsupport char: \'%c\', quit.", lexer->curChar);
+                    LEX_ERROR(lexer, "Not support char: \'%c\', quit.", lexer->curChar);
                 }
                 return;
         }
@@ -553,14 +552,6 @@ void assertCurToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg)
     getNextToken(lexer);
 }
 
-// 断言下一个 token 类型为期望类型，否则报错
-void assertNextToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg) {
-    getNextToken(lexer);
-    if (lexer->curToken.type != expectTokenType) {
-        COMPILE_ERROR(lexer, errMsg);
-    }
-}
-
 // 初始化词法分析器
 void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode, ObjModule *objModule) {
     lexer->vm = vm;
@@ -569,8 +560,8 @@ void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode, O
     lexer->file = file;
     // sourceCode 本身就是源码串中首字符地址
     lexer->sourceCode = sourceCode;
-    lexer->curChar = *sourceCode;
-    lexer->nextCharPtr = sourceCode + 1;
+    lexer->curChar = *lexer->sourceCode;
+    lexer->nextCharPtr = lexer->sourceCode + 1;
     lexer->curToken.start = NULL;
     lexer->curToken.length = 0;
     lexer->curToken.lineNo = 1;

@@ -226,7 +226,7 @@ static void writeOpCodeShortOperand(CompileUnit *cu, OpCode opCode, int operand)
 }
 
 // 获取 ip 所指向的操作码的操作数占用的字节数
-uint32_t getBytesOfOperands(Byte *instrStream, Value *constants, int ip) {
+uint32_t getBytesOfOperands(const Byte *instrStream, Value *constants, int ip) {
     switch ((OpCode)instrStream[ip]) {
         case OPCODE_CONSTRUCT:
         case OPCODE_RETURN:
@@ -295,7 +295,7 @@ uint32_t getBytesOfOperands(Byte *instrStream, Value *constants, int ip) {
         case OPCODE_SUPER14:
         case OPCODE_SUPER15:
         case OPCODE_SUPER16:
-            // OPCODE_SUPERx 的操作数是分别由 writeOpCodeShortOperand
+            // OPCODE_SUPER x 的操作数是分别由 writeOpCodeShortOperand
             // 和 writeShortOperand 写入的,共 1 个操作码和 4 个字节的操作数
             return 4;
 
@@ -317,7 +317,7 @@ uint32_t getBytesOfOperands(Byte *instrStream, Value *constants, int ip) {
         }
 
         default:
-            NOT_REACHED();
+            NOT_REACHED
     }
 }
 
@@ -349,7 +349,7 @@ static uint32_t sign2String(Signature *sign, char *buf) {
     uint32_t pos = 0;
 
     // 将方法签名中的方法名 xxx 复制到 buf 中
-    memcpy(buf[pos], sign->name, sign->length);
+    memcpy(buf + pos, sign->name, sign->length);
     pos += sign->length;
 
     switch (sign->type) {
@@ -438,14 +438,14 @@ static uint32_t sign2String(Signature *sign, char *buf) {
 static uint32_t addLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
     LocalVar *var = &(cu->localVars[cu->localVarNum]);
     var->name = name;
-    var->name = length;
+    var->length = length;
     var->scopeDepth = cu->scopeDepth;
     var->isUpvalue = false;
     return cu->localVarNum++;
 }
 
 // 声明局部变量（最后会调用上面的 addLocalVar）
-static declareLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
+static int declareLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
     // 一个编译单元中所有局部作用域的局部变量总数不能超过 MAX_LOCAL_VAR_NUM，即 128 个
     if (cu->localVarNum > MAX_LOCAL_VAR_NUM) {
         COMPILE_ERROR(cu->curLexer, "the max amount of local variable of one compile unit (such as function) is %d", MAX_LOCAL_VAR_NUM);
@@ -687,7 +687,7 @@ static void emitLoadVariable(CompileUnit *cu, Variable var) {
             writeOpCodeByteOperand(cu, OPCODE_LOAD_MODULE_VAR, var.index);
             break;
         default:
-            NOT_REACHED();
+            NOT_REACHED
     }
 }
 
@@ -707,7 +707,7 @@ static void emitStoreVariable(CompileUnit *cu, Variable var) {
             writeOpCodeByteOperand(cu, OPCODE_STORE_MODULE_VAR, var.index);
             break;
         default:
-            NOT_REACHED();
+            NOT_REACHED
     }
 }
 
@@ -873,7 +873,7 @@ static void emitCallBySignature(CompileUnit *cu, Signature *sign, OpCode opcode)
     writeOpCodeShortOperand(cu, opcode + sign->argNum, symbolIndex);
 
     // 背景知识：
-    // 操作码 OPCODE_SUPERx 用于调用基类的方法的
+    // 操作码 OPCODE_SUPER x 用于调用基类的方法的
     // 其操作数有 4 个字节，其中前两个字节存储 基类方法在基类中的索引 methodIndex，即 super.method[methodIndex] 表示基类的方法
     // 后两个字节存储 基类在常量中的索引 superClassIndex，即 constants[superClassIndex] 表示基类
 
@@ -974,7 +974,7 @@ static void emitGetterMethodCall(CompileUnit *cu, Signature *sign, OpCode opCode
         // 但是有根据 sign->type 判断该方法为构造函数，调用形式应类似 super() 或者 super(arguments)
         // 所以调用形式有问题，直接报编译错误即可
         if (newSign.type != SIGN_METHOD) {
-            COMPILE_ERROR(cu->curLexer, "the form of supercall is super() or super(arguments)");
+            COMPILE_ERROR(cu->curLexer, "the form of superCall is super() or super(arguments)");
         }
         newSign.type = SIGN_CONSTRUCT;
     }
@@ -1044,7 +1044,7 @@ static bool trySetter(CompileUnit *cu UNUSED, Signature *sign) {
 }
 
 // 为标识符生成方法签名
-static void idMethodSignature(CompileUnit *cu UNUSED, Signature *sign) {
+static void idMethodSignature(CompileUnit *cu, Signature *sign) {
     // 先默认设置成 getter 类型方法
     sign->type = SIGN_GETTER;
 
@@ -1052,7 +1052,7 @@ static void idMethodSignature(CompileUnit *cu UNUSED, Signature *sign) {
     if (sign->length == 3 && memcmp(sign->name, "new", 3) == 0) {
         // 构造函数的方法名后面不能接 =
         if (matchToken(cu->curLexer, TOKEN_ASSIGN)) {
-            COMPILE_ERROR(cu->curLexer, "constructor shoudn't be setter!");
+            COMPILE_ERROR(cu->curLexer, "constructor shouldn't be setter!");
         }
 
         // 构造函数的方法名 new 后面必须为 (
@@ -1075,7 +1075,7 @@ static void idMethodSignature(CompileUnit *cu UNUSED, Signature *sign) {
         }
 
         // 如果方法名后面不是 (，则说明是 getter 类型方法，开头已经默认设置，且 getter 方法没有参数，所以直接返回即可
-        if (!matchToken(cu->curLexer, TOKEN_LEFT_BRACKET)) {
+        if (!matchToken(cu->curLexer, TOKEN_LEFT_PAREN)) {
             return;
         }
 
@@ -1121,7 +1121,7 @@ static void infixMethodSignature(CompileUnit *cu UNUSED, Signature *sign UNUSED)
     declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
 
     // 参数后面必须为 )
-    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after paramter!");
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after parameter!");
 }
 
 // 为既可做单运算符也可做中缀运算符的符号方法生成方法签名
@@ -1146,7 +1146,7 @@ static void mixMethodSignature(CompileUnit *cu UNUSED, Signature *sign UNUSED) {
         declareVariable(cu, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
 
         // 参数后面必须为 )
-        assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after paramter!");
+        assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after parameter!");
     }
 }
 
@@ -1393,7 +1393,7 @@ static void id(CompileUnit *cu, bool canAssign) {
             uint32_t clsLen = classBK->name->value.length;
             memmove(staticFieldId + 3, clsName, clsLen);
             // 再写入空格
-            memmove(staticFieldId + 3 + clsLen, ' ', 1);
+            memmove(staticFieldId + 3 + clsLen, " ", 1);
             // 再写入静态属性名
             memmove(staticFieldId + 3 + clsLen + 1, name.start, name.length);
 
@@ -1557,7 +1557,7 @@ static void super(CompileUnit *cu, bool canAssign) {
 }
 
 // 编译小括号 (，即小括号 ( 的 nud 方法
-static void parenthese(CompileUnit *cu, bool canAssign UNUSED) {
+static void parentheses(CompileUnit *cu, bool canAssign UNUSED) {
     // 小括号是用来提高优先级，被括起来的表达式相当于被分成一组，作为一个整体参与计算，所以只需生成【计算该表达式的结果】的指令
     expression(cu, BP_LOWEST);
     assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after expression!");
@@ -1599,7 +1599,7 @@ static void mapLiteral(CompileUnit *cu, bool canAssign UNUSED) {
 }
 
 // 编译用于字面量的中括号，即用于字面量的中括号的 nud 方法
-// 例如 var listA = ["duang", 1+2*3, 'x']
+// 例如 var listA = ["dang", 1+2*3, 'x']
 // 执行本函数时，preToken 为 [，curToken 为 [ 后面的字符
 static void listLiteral(CompileUnit *cu, bool canAssign UNUSED) {
     // 这种方式创建 list 对象其实是一种语法糖，内部也是先调用 List.new() 方法创建一个 list 对象实例，然后通过 list.addCore_() 添加中括号里面的元素
@@ -1616,7 +1616,7 @@ static void listLiteral(CompileUnit *cu, bool canAssign UNUSED) {
             break;
         }
         // 先生成【计算中括号里的每一个表达式的结果，并压入到运行时栈顶】的指令，一次循环计算一个表达式
-        // 例如 var listA = ["duang", 1+2*3, 'x']，第二次循环就计算 1+2*3 的结果 7，然后将 7 压入到运行时栈顶
+        // 例如 var listA = ["dang", 1+2*3, 'x']，第二次循环就计算 1+2*3 的结果 7，然后将 7 压入到运行时栈顶
         expression(cu, BP_LOWEST);
 
         // 将运行时栈顶的值（即表达式的计算结果）写入到 list 对象实例中
@@ -1708,14 +1708,14 @@ static void patchPlaceHolder(CompileUnit *cu, uint32_t absIndex) {
     // 1010 0010 1101 0001 >> 8
     // &
     // 0000 0000 1111 1111
-    cu->fn->instrStream.datas[absIndex] = (offset >> 8) && 0xff;
+    cu->fn->instrStream.datas[absIndex] = (offset >> 8) & 0xff;
 
     // 其中偏移量的低位地址写入到 absIndex+1 索引对应的字节中，即回填偏移量地址的低 8 位
     // offset && 0xff 就是获取 offset 的低 8 位
     // 1010 0010 1101 0001
     // &
     // 0000 0000 1111 1111
-    cu->fn->instrStream.datas[absIndex + 1] = offset && 0xff;
+    cu->fn->instrStream.datas[absIndex + 1] = offset & 0xff;
 }
 
 // 编译 || 符号，即符号 || 的 led 方法
@@ -1831,7 +1831,7 @@ static void condition(CompileUnit *cu, bool canAssign UNUSED) {
 // 之所以要按照顺序填写，是为了方便用枚举值从 Rules 数组中找到某个类型的 token 的对应的符号绑定规则
 SymbolBindRule Rules[] = {
     /* TOKEN_INVALID */ UNUSED_RULE,
-    /* TOKRN_NUM */ PREFIX_SYMBOL(literal),
+    /* TOKEN_NUM */ PREFIX_SYMBOL(literal),
     /* TOKEN_STRING */ PREFIX_SYMBOL(literal),
     /* TOKEN_ID */ {NULL, BP_NONE, id, NULL, idMethodSignature},
     /* TOKEN_INTERPOLATION */ PREFIX_SYMBOL(stringInterpolation),
@@ -1850,39 +1850,39 @@ SymbolBindRule Rules[] = {
     /* TOKEN_CLASS */ UNUSED_RULE,
     /* TOKEN_THIS */ PREFIX_SYMBOL(this),
     /* TOKEN_STATIC */ UNUSED_RULE,
-    /* TOKEN_IS */ INFIX_OPERATOR('is', BP_IS),
+    /* TOKEN_IS */ INFIX_OPERATOR("is", BP_IS),
     /* TOKEN_SUPER */ PREFIX_SYMBOL(super),
     /* TOKEN_IMPORT */ UNUSED_RULE,
     /* TOKEN_COMMA */ UNUSED_RULE,
     /* TOKEN_COLON */ UNUSED_RULE,
-    /* TOKEN_LEFT_PAREN */ PREFIX_SYMBOL(parenthese),
+    /* TOKEN_LEFT_PAREN */ PREFIX_SYMBOL(parentheses),
     /* TOKEN_RIGHT_PAREN */ UNUSED_RULE,
     /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, listLiteral, subscript, subscriptMethodSignature},
     /* TOKEN_RIGHT_BRACKET */ UNUSED_RULE,
     /* TOKEN_LEFT_BRACE */ PREFIX_SYMBOL(mapLiteral),
     /* TOKEN_RIGHT_BRACE */ UNUSED_RULE,
     /* TOKEN_DOT */ INFIX_SYMBOL(BP_CALL, callEntry),
-    /* TOKEN_DOT_DOT */ INFIX_OPERATOR('..', BP_RANGE),
-    /* TOKEN_ADD */ INFIX_OPERATOR('+', BP_TERM),
-    /* TOKEN_SUB */ MIX_OPERATOR('-'),
-    /* TOKEN_MUL */ INFIX_OPERATOR('*', BP_FACTOR),
-    /* TOKEN_DIV */ INFIX_OPERATOR('/', BP_FACTOR),
-    /* TOKEN_MOD */ INFIX_OPERATOR('%', BP_FACTOR),
+    /* TOKEN_DOT_DOT */ INFIX_OPERATOR("..", BP_RANGE),
+    /* TOKEN_ADD */ INFIX_OPERATOR("+", BP_TERM),
+    /* TOKEN_SUB */ MIX_OPERATOR("-"),
+    /* TOKEN_MUL */ INFIX_OPERATOR("*", BP_FACTOR),
+    /* TOKEN_DIV */ INFIX_OPERATOR("/", BP_FACTOR),
+    /* TOKEN_MOD */ INFIX_OPERATOR("%", BP_FACTOR),
     /* TOKEN_ASSIGN */ UNUSED_RULE,
-    /* TOKEN_BIT_AND */ INFIX_OPERATOR('&', BP_BIT_AND),
-    /* TOKEN_BIT_OR */ INFIX_OPERATOR('|', BP_BIT_OR),
-    /* TOKEN_BIT_NOT */ PREFIX_OPERATOR('~'),
-    /* TOKEN_BIT_SHIFT_RIGHT */ INFIX_OPERATOR('>>', BP_BIT_SHIFT),
-    /* TOKEN_BIT_SHIFT_LEFT */ INFIX_OPERATOR('<<', BP_BIT_SHIFT),
+    /* TOKEN_BIT_AND */ INFIX_OPERATOR("&", BP_BIT_AND),
+    /* TOKEN_BIT_OR */ INFIX_OPERATOR("|", BP_BIT_OR),
+    /* TOKEN_BIT_NOT */ PREFIX_OPERATOR("~"),
+    /* TOKEN_BIT_SHIFT_RIGHT */ INFIX_OPERATOR(">>", BP_BIT_SHIFT),
+    /* TOKEN_BIT_SHIFT_LEFT */ INFIX_OPERATOR("<<", BP_BIT_SHIFT),
     /* TOKEN_LOGIC_AND */ INFIX_SYMBOL(BP_LOGIC_AND, logicAnd),
     /* TOKEN_LOGIC_OR */ INFIX_SYMBOL(BP_LOGIC_OR, logicOr),
-    /* TOKEN_LOGIC_NOT */ PREFIX_OPERATOR('!'),
-    /* TOKEN_EQUAL */ INFIX_OPERATOR('==', BP_EQUAL),
-    /* TOKEN_NOT_EQUAL */ INFIX_OPERATOR('!=', BP_EQUAL),
-    /* TOKEN_GREATE */ INFIX_OPERATOR('>', BP_CMP),
-    /* TOKEN_GREATE_EQUAL */ INFIX_OPERATOR('>=', BP_CMP),
-    /* TOKEN_LESS */ INFIX_OPERATOR('<', BP_CMP),
-    /* TOKEN_LESS_EQUAL */ INFIX_OPERATOR('<=', BP_CMP),
+    /* TOKEN_LOGIC_NOT */ PREFIX_OPERATOR("!"),
+    /* TOKEN_EQUAL */ INFIX_OPERATOR("==", BP_EQUAL),
+    /* TOKEN_NOT_EQUAL */ INFIX_OPERATOR("!=", BP_EQUAL),
+    /* TOKEN_GREAT */ INFIX_OPERATOR(">", BP_CMP),
+    /* TOKEN_GREAT_EQUAL */ INFIX_OPERATOR(">=", BP_CMP),
+    /* TOKEN_LESS */ INFIX_OPERATOR("<", BP_CMP),
+    /* TOKEN_LESS_EQUAL */ INFIX_OPERATOR("<=", BP_CMP),
     /* TOKEN_QUESTION */ INFIX_SYMBOL(BP_CONDITION, condition),
     /* TOKEN_EOF */ UNUSED_RULE,
 };
@@ -1932,7 +1932,7 @@ static void unaryOperator(CompileUnit *cu, bool canAssign UNUSED) {
     // 前缀运算符方法的参数为 0
     // 例如表达式 !3 会被视为 3.!，即 3 调用 ! 操作符对应的方法
     // 实际上在虚拟机中会有个默认参数，即调用该方法的对象实例，在这里就是数字对象 3，所以就可以计算 3 取反的结果
-    emitCall(cu, rule->id, strlen(rule->id), 0);
+    emitCall(cu, rule->id, 1, 0);
 }
 
 // 语法分析的核心方法 expression，用来解析表达式结果
@@ -2041,7 +2041,7 @@ static void compileVarDefinition(CompileUnit *cu, bool isStatic) {
 
             if (fieldIndex == -1) {
                 // 如果没有，就添加进去
-                fieldIndex = addSymbol(cu->curLexer->vm, &classBK->fields, name.start, name.length);
+                addSymbol(cu->curLexer->vm, &classBK->fields, name.start, name.length);
             } else {
                 // 否则就是已经存在相同属性
                 if (fieldIndex > MAX_FIELD_NUM) {
@@ -2183,7 +2183,7 @@ static void leaveLoopSetting(CompileUnit *cu) {
         } else {
             // 如果该指令不是操作码为 OPCODE_JUMP 的指令，则指向下一个指令
             // 当前指令大小 = 操作码大小（1 个字节） + getBytesOfOperands 获取到的操作数的大小
-            idx = 1 + getBytesOfOperands(&cu->fn->instrStream.datas, cu->fn->constants.datas, idx);
+            idx = 1 + getBytesOfOperands(cu->fn->instrStream.datas, cu->fn->constants.datas, idx);
         }
     }
 
@@ -2333,11 +2333,11 @@ static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length) {
     int index = ensureSymbolExist(cu->curLexer->vm, &cu->curLexer->vm->allMethodNames, signStr, length);
 
     // 为了防止重复声明，即方法名 signStr 对应的方法之前已经声明过了（ensureSymbolExist 方法无法做到）
-    // 定义了两个结构，ClassBookKeep->staticMehotds 保存类方法在 vm->allMethodNames 的索引
-    // ClassBookKeep->instantMehotds 保存实例方法在 vm->allMethodNames 的索引
-    // 所以从 ClassBookKeep->instantMehotds/staticMehotds 中查找是否存在与上面 ensureSymbolExist 得到的索引 index 相同的值
+    // 定义了两个结构，ClassBookKeep->staticMethods 保存类方法在 vm->allMethodNames 的索引
+    // ClassBookKeep->instantMethods 保存实例方法在 vm->allMethodNames 的索引
+    // 所以从 ClassBookKeep->instantMethods/staticMethods 中查找是否存在与上面 ensureSymbolExist 得到的索引 index 相同的值
     // 如果有，则就是重复声明方法名
-    IntBuffer *methods = cu->enclosingClassBK->isStatic ? &cu->enclosingClassBK->staticMehthods : &cu->enclosingClassBK->instantMethods;
+    IntBuffer *methods = cu->enclosingClassBK->isStatic ? &cu->enclosingClassBK->staticMethods : &cu->enclosingClassBK->instantMethods;
     uint32_t idx = 0;
     while (idx < methods->count) {
         if (methods->datas[idx] == index) {
@@ -2346,7 +2346,7 @@ static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length) {
         idx++;
     }
 
-    // 如果执行到这里，说明该类方法之前没有声明过，则将其加入到 ClassBookKeep->instantMehotds/staticMehotds，方便后续排查是否重复声明
+    // 如果执行到这里，说明该类方法之前没有声明过，则将其加入到 ClassBookKeep->instantMethods/staticMethods，方便后续排查是否重复声明
     IntBufferAdd(cu->curLexer->vm, methods, index);
     return index;
 }
@@ -2392,7 +2392,7 @@ static void emitCreateInstance(CompileUnit *cu, Signature *sign, uint32_t method
     // 2. 生成【调用上个指令创建的处在栈底的实例对象的 new 方法】的指令
     // 注：实例对象的 new 方法，会将上条指令创建的处在栈底的实例对象，压入到栈顶，并返回
     // 即实例对象的 new 方法除了用户写的代码之外，还会在被编译的指令流尾部添加两个指令：
-    // OPODE_LOAD_LOCAL_VAR, 0（将栈底的实例对象加载到栈顶）    OPCODE_RETURN（将栈顶的实例对象返回）
+    // OPCODE_LOAD_LOCAL_VAR, 0（将栈底的实例对象加载到栈顶）    OPCODE_RETURN（将栈顶的实例对象返回）
     // 该逻辑会在后面编译类的定义中的编译类中的实例方法 new() {...} 方法时看到
     writeOpCodeShortOperand(&methodCU, (OpCode)(OPCODE_CALL0 + sign->argNum), methodIndex);
 
@@ -2420,7 +2420,7 @@ static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic) {
     // curToken 为方法名，所以 curToken.type 为 TOKEN_ID，对应的 methodSign（用于生成方法签名的函数） 为 idMethodSignature
     methodSignatureFn methodSign = Rules[cu->curLexer->curToken.type].methodSign;
     if (methodSign == NULL) {
-        COMPILE_ERROR(cu->curLexer, "method need signature funtion!");
+        COMPILE_ERROR(cu->curLexer, "method need signature function!");
     }
 
     // 初始化方法签名
@@ -2454,7 +2454,7 @@ static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic) {
     char signatureString[MAX_SIGN_LEN] = {'\0'};
     uint32_t signLen = sign2String(&sign, signatureString);
 
-    // 声明方法
+    // 声明方法`
     // 声明方法只是在 vm->allMethodNames 声明方法名，不涉及方法体
     uint32_t methodIndex = declareMethod(cu, signatureString, signLen);
 
@@ -2481,10 +2481,10 @@ static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic) {
 
         // 改变方法类型并重新生成方法签名和对应的字符串形式
         sign.type = SIGN_METHOD;
-        char signatureString[MAX_SIGN_LEN] = {'\0'};
-        uint32_t signLen = strlen(signatureString);
+        char signatureString2[MAX_SIGN_LEN] = {'\0'};
+        uint32_t signLen2 = strlen(signatureString2);
         // 确保该方法签名在 vm->allMethodNames 存在，不存在的话会直接插入并返回其索引，存在的话直接返回索引
-        uint32_t constructorIndex = ensureSymbolExist(cu->curLexer->vm, &cu->curLexer->vm->allMethodNames, signatureString, signLen);
+        uint32_t constructorIndex = ensureSymbolExist(cu->curLexer->vm, &cu->curLexer->vm->allMethodNames, signatureString2, signLen2);
 
         // 定义新创建的类的静态方法 new
         // 此时栈顶为【创建对象实例】的方法闭包
@@ -2550,7 +2550,7 @@ static void compileClassDefinition(CompileUnit *cu) {
     emitLoadConstant(cu, OBJ_TO_VALUE(className));
 
     // 处理类继承
-    if (matchToken(cu->curLoop, TOKEN_LESS)) {
+    if (matchToken(cu->curLexer, TOKEN_LESS)) {
         // 如果类名后面有用于继承的关键字 <，则将关键字 < 后面的类名作为父类名，压入到栈顶
         expression(cu, BP_CALL);
     } else {
@@ -2577,14 +2577,14 @@ static void compileClassDefinition(CompileUnit *cu) {
     classBK.isStatic = false;
     StringBufferInit(&classBK.fields);
     IntBufferInit(&classBK.instantMethods);
-    IntBufferInit(&classBK.staticMehthods);
+    IntBufferInit(&classBK.staticMethods);
 
     // 此时 cu 是模块的编译单元，负责跟踪当前编译的类
     // 注：类没有编译单元
     cu->enclosingClassBK = &classBK;
 
     // 类名后面需为符号 {
-    assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "expect '{' after class na,e in the class declaration!");
+    assertCurToken(cu->curLexer, TOKEN_LEFT_BRACE, "expect '{' after class name in the class declaration!");
 
     // 进入类体
     enterScope(cu);
@@ -2601,10 +2601,10 @@ static void compileClassDefinition(CompileUnit *cu) {
     // 现在类已经编译完了，回填正确的属性个数
     cu->fn->instrStream.datas[fieldNumIndex] = classBK.fields.count;
 
-    // classBK 用于在编译类的过程记录一些类的信息，例如 classBK.fields 收集属性，classBK.staticMehthods 收集类的静态方法 等，
+    // classBK 用于在编译类的过程记录一些类的信息，例如 classBK.fields 收集属性，classBK.staticMethods 收集类的静态方法 等，
     // 方便在编译类的过程中做类似判断是否命名冲突等逻辑，等到类的编译结束时，就会回收分配给 classBK 的内存
     symbolTableClear(cu->curLexer->vm, &classBK.fields);
-    IntBufferClear(cu->curLexer->vm, &classBK.staticMehthods);
+    IntBufferClear(cu->curLexer->vm, &classBK.staticMethods);
     IntBufferClear(cu->curLexer->vm, &classBK.instantMethods);
 
     // enclosingClassBK 用来表示是否正在编译类，
@@ -2678,19 +2678,19 @@ static void compileFunctionDefinition(CompileUnit *cu) {
 // System.importModule("foo")
 // import foo for bar1, bar2
 // 将按照一下形式处理：
-// var bar1 = System.getModuleVarible("foo", "bar1")
-// var bar2 = System.getModuleVarible("foo", "bar2")
+// var bar1 = System.getModuleVariable("foo", "bar1")
+// var bar2 = System.getModuleVariable("foo", "bar2")
 static void compileImport(CompileUnit *cu) {
     // 执行此函数时已经读入了关键字 import
 
     // import 后面需要为模块名，即 token 类型为 TOKEN_ID
-    assertCurToken(cu->curLexer, TOKEN_ID, "expect module name after expoert!");
+    assertCurToken(cu->curLexer, TOKEN_ID, "expect module name after export!");
 
     // 将模块名转为字符串
     ObjString *moduleName = newObjString(cu->curLexer->vm, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
 
     // 将模块名转化后的字符串作为变量添加到编译单元的 fn->constants 中
-    uint32_t constModIdx = addConstant(cu, VT_TO_VALUE(moduleName));
+    uint32_t constModIdx = addConstant(cu, OBJ_TO_VALUE(moduleName));
 
     // 1. 为调用 System.importModule('foo')，生成【压入参数 System 到运行时栈顶】的指令
     // 即压入 名为 System 的模块变量 到运行时栈中，其实是压入 其在 curModule->moduleVarName 的索引值
@@ -2713,7 +2713,7 @@ static void compileImport(CompileUnit *cu) {
     }
 
     // 否则后面有 for，例如 import foo for bar1, bar2，其中 bar1 和 bar2 就是 foo 模块中的变量
-    // 将其转成 var bar1 = System.getModuleVarible("foo", "bar1") var bar2 = System.getModuleVarible("foo", "bar2") 形式处理
+    // 将其转成 var bar1 = System.getModuleVariable("foo", "bar1") var bar2 = System.getModuleVariable("foo", "bar2") 形式处理
     do {
         // 关键字 for 后面需要跟变量名，对应 token 类型为 TOKEN_ID
         assertCurToken(cu->curLexer, TOKEN_ID, "expect variable name after 'for' in import!");
@@ -2758,7 +2758,7 @@ static void compileProgram(CompileUnit *cu) {
         // 编译变量定义
         // 判断前面的 token 是否是 static，如果是，则该变量为类的静态属性
         compileVarDefinition(cu, cu->curLexer->preToken.type == TOKEN_STATIC);
-    } else if (matchToken(cu, TOKEN_IMPORT)) {
+    } else if (matchToken(cu->curLexer, TOKEN_IMPORT)) {
         // 编译模块导入
         compileImport(cu);
     } else {
@@ -2770,26 +2770,26 @@ static void compileProgram(CompileUnit *cu) {
 // 编译模块
 ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode) {
     // 每个模块（文件）都需要一个单独的词法分析器进行编译
-    Lexer *lexer;
-    lexer->parent = vm->curLexer;
+    Lexer lexer;
+    lexer.parent = vm->curLexer;
     vm->curLexer = &lexer;
 
     // 初始化词法分析器
     if (objModule->name == NULL) {
         // 核心模块对应的词法分析器用 core.script.inc 作为模块名进行初始化
-        initLexer(vm, lexer, "core.script.inc", moduleCode, objModule);
+        initLexer(vm, &lexer, "core.script.inc", moduleCode, objModule);
     } else {
         // 其余模块对应的词法分析器用该模块名进行初始化
-        initLexer(vm, lexer, (const char *)objModule->name->value.start, moduleCode, objModule);
+        initLexer(vm, &lexer, (const char *)objModule->name->value.start, moduleCode, objModule);
     }
 
     // 初始化编译单元（模块也有编译单元）
     // 有编译单元的：模块、函数、方法
     CompileUnit moduleCU;
-    initCompileUnit(lexer, &moduleCU, NULL, false);
+    initCompileUnit(&lexer, &moduleCU, NULL, false);
 
     //记录当前编译模块的变量数量，后面检查预定义模块变量时可减少遍历，也就是在下面编译之前，就已经在 moduleVarValue 中的变量，无需遍历检查是否声明过
-    uint32_t moduleVarNumBefor = objModule->moduleVarValue.count;
+    uint32_t moduleVarNumBefore = objModule->moduleVarValue.count;
 
     // 由于 initLexer 初始化函数中将 lexer 的 curToken 的 type 设置为 TOKEN_UNKNOWN
     // 会导致后面的 while 循环不执行（循环体用于执行真正编译的方法）
@@ -2798,7 +2798,7 @@ ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode) {
 
     // 循环调用 compileProgram 函数进行编译，直到 token 流结尾
     // TOKEN_EOF 标记文件结束，即该 token 为最后一个 token
-    while (!matchToken(lexer, TOKEN_EOF)) {
+    while (!matchToken(&lexer, TOKEN_EOF)) {
         compileProgram(&moduleCU);
     }
 
@@ -2822,9 +2822,9 @@ ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode) {
 
     // 所以此处检测本次编译得到的 moduleVarValue 中的变量值是否还是存 VT_NUM 类型，也就是变量尚未声明的，如果有就直接报错
     // 注：在本次编译之前，就已经在 moduleVarValue 中的变量，无需遍历检查是否声明过
-    uint32_t idx = moduleVarNumBefor;
+    uint32_t idx = moduleVarNumBefore;
     while (idx < objModule->moduleVarValue.count) {
-        if (VALUE_IS_NULL(objModule->moduleVarValue.datas[idx])) {
+        if (VALUE_IS_NUM(objModule->moduleVarValue.datas[idx])) {
             char *str = objModule->moduleVarName.datas[idx].str;
             uint32_t lineNo = VALUE_TO_NUM(objModule->moduleVarValue.datas[idx]);
             COMPILE_ERROR(&lexer, "line:%d, variable \'%s\' not defined!", lineNo, str);

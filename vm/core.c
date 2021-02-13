@@ -84,7 +84,7 @@ static bool validateString(VM *vm, Value arg) {
     if (VALUE_IS_OBJSTR(arg)) {
         return true;
     }
-    SET_ERROR_FALSE(vm, "argument must be string!");
+    SET_ERROR_FALSE(vm, "argument must be string!")
 }
 
 // 判断 arg 是否为函数
@@ -101,7 +101,7 @@ static bool validateNum(VM *vm, Value arg) {
     if (VALUE_IS_NUM(arg)) {
         return true;
     }
-    SET_ERROR_FALSE(vm, "argument must be number!");
+    SET_ERROR_FALSE(vm, "argument must be number!")
 }
 
 // 判断 value 是否为整数
@@ -109,7 +109,7 @@ static bool validateIntValue(VM *vm, double value) {
     if (trunc(value) == value) {
         return true;
     }
-    SET_ERROR_FALSE(vm, "argument must be integer!");
+    SET_ERROR_FALSE(vm, "argument must be integer!")
 }
 
 // 判断 arg 是否为整数
@@ -162,7 +162,7 @@ static bool validateKey(VM *vm, Value arg) {
         VALUE_IS_CLASS(arg)) {
         return true;
     }
-    SET_ERROR_FALSE(vm, "key must be value type!");
+    SET_ERROR_FALSE(vm, "key must be value type!")
 }
 
 // 基于码点 value 创建字符串
@@ -262,7 +262,7 @@ static ObjString *newObjStringFromSub(VM *vm, ObjString *sourceStr, int startInd
     return result;
 }
 
-// 使用 Boyer-Moore-Horspool 字符串匹配算法在 haystack 中查找 needle
+// 使用 Boyer-Moore-HorsPool 字符串匹配算法在 haystack 中查找 needle
 static int findString(ObjString *haystack, ObjString *needle) {
     // 如果待查找的 patten 为空则为找到，直接返回 0 即可
     if (needle->value.length == 0) {
@@ -297,13 +297,13 @@ static int findString(ObjString *haystack, ObjString *needle) {
     while (idx < needleEnd) {
         char c = needle->value.start[idx];
         // idx 从前往后遍历 needle，当 needle 中有重复的字符 c 时，
-        // 后面的字符 c 会覆盖前面的同名字符 c，这保证了数组 shilf 中字符是 needle 中最末位置的字符，
-        // 从而保证了 shilf[c] 的值是 needle中 最末端同名字符与 needle 末端的偏移量
+        // 后面的字符 c 会覆盖前面的同名字符 c，这保证了数组 shift 中字符是 needle 中最末位置的字符，
+        // 从而保证了 shift[c] 的值是 needle 中 最末端同名字符与 needle 末端的偏移量
         shift[(uint8_t)c] = needleEnd - idx;
         idx++;
     }
 
-    // Boyer-Moore-Horspool 是从后往前比较，这是处理 bad-character 高效的地方，
+    // Boyer-Moore-HorsPool 是从后往前比较，这是处理 bad-character 高效的地方，
     // 因此获取 needle 中最后一个字符，用于同 haystack 的窗口中最后一个字符比较
     char lastChar = needle->value.start[needleEnd];
 
@@ -314,7 +314,7 @@ static int findString(ObjString *haystack, ObjString *needle) {
     idx = 0;
     while (idx <= range) {
         // 拿 needle 中最后一个字符同 haystack 窗口的最后一个字符比较
-        //（因为Boyer-Moore-Horspool是从后往前比较），如果匹配，看整个 needle 是否匹配
+        //（因为Boyer-Moore-HorsPool是从后往前比较），如果匹配，看整个 needle 是否匹配
         char c = haystack->value.start[idx + needleEnd];
         if (lastChar == c &&
             memcmp(haystack->value.start + idx, needle->value.start, needleEnd) == 0) {
@@ -331,7 +331,7 @@ static int findString(ObjString *haystack, ObjString *needle) {
 }
 
 // 根据模块名获取文件绝对路径
-// 拼接规则：rootDir + modileName + '.di'
+// 拼接规则：rootDir + moduleName + '.di'
 static char *getFilePath(const char *moduleName) {
     uint32_t rootDirLength = rootDir == NULL ? 0 : strlen(rootDir);
     uint32_t nameLength = strlen(moduleName);
@@ -369,7 +369,7 @@ int getIndexFromSymbolTable(SymbolTable *table, const char *symbol, uint32_t len
     uint32_t index = 0;
     // 遍历 table->data，找到与 symbol 相等的，然后返回该索引值
     while (index < table->count) {
-        if (length == table->datas[index].length == length && memcmp(table->datas[index].str, symbol, length) == 0) {
+        if (length == table->datas[index].length && memcmp(table->datas[index].str, symbol, length) == 0) {
             return index;
         }
         index++;
@@ -400,7 +400,7 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode) {
         ObjString *modName = VALUE_TO_OBJSTR(moduleName);
         ASSERT(modName->value.start[modName->value.length] == '\0', "string.value.start is not terminated!");
         // 创建模块名为 modName 的模块对象
-        module = newObjModule(vm, modName);
+        module = newObjModule(vm, modName->value.start);
         // 将名为 moduleName 的模块加载到 vm->allModules
         mapSet(vm, vm->allModules, moduleName, OBJ_TO_VALUE(module));
 
@@ -420,7 +420,8 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode) {
     ObjFn *fn = compileModule(vm, module, moduleCode);
     // 单独创建一个线程运行编译后的模块
     ObjClosure *objClosure = newObjClosure(vm, fn);
-    ObjThread *objThread = newObjThread(vm, objClosure);
+    ObjThread *moduleThread = newObjThread(vm, objClosure);
+    return moduleThread;
 }
 
 // 导入模块 moduleName，主要是把编译模块并加载到 vm->allModules
@@ -535,7 +536,7 @@ void bindMethod(VM *vm, Class *class, uint32_t index, Method method) {
     // 这样就可以通过相同的索引获取到方法体或者方法名
     // 然而 vm->allMethodNames 只有一个，但会对应多个类，所以各个类的 methods 数组中的方法体数量必然会小于 vm->allMethodNames 中的方法名数量
     // 为了保证一样长度，就需要将各个类的 methods 数组中无用的索引处用空占位填充
-    if (index > class->methods.count) {
+    if (index >= class->methods.count) {
         Method emptyPad = {MT_NONE, {0}};
         MethodBufferFillWrite(vm, &class->methods, emptyPad, index - class->methods.count + 1);
     }
@@ -612,19 +613,19 @@ static void bindFnOverloadCall(VM *vm, const char *sign) {
 // !args[0]: object 取反，结果为 false
 static bool
     primObjectNot(VM *vm UNUSED, Value *args) {
-    RET_VALUE(VT_TO_VALUE(VT_FALSE));
+    RET_VALUE(VT_TO_VALUE(VT_FALSE))
 }
 
 // args[0] == args[1]: 返回 object 是否相等
 static bool primObjectEqual(VM *vm UNUSED, Value *args) {
     Value boolValue = BOOL_TO_VALUE(valueIsEqual(args[0], args[1]));
-    RET_VALUE(boolValue);
+    RET_VALUE(boolValue)
 }
 
 // args[0] == args[1]: 返回 object 是否不等
 static bool primObjectNotEqual(VM *vm UNUSED, Value *args) {
     Value boolValue = BOOL_TO_VALUE(!valueIsEqual(args[0], args[1]));
-    RET_VALUE(boolValue);
+    RET_VALUE(boolValue)
 }
 
 // args[0] is args[1]: args[1] 类是否是 args[0] 对象所属的类或者其子类
@@ -641,26 +642,26 @@ static bool primObjectIs(VM *vm, Value *args) {
     while (baseClass != NULL) {
         // 如果某一级基类匹配到，就设置返回值为 VT_TRUE 并返回
         if (thisClass == baseClass) {
-            RET_VALUE(VT_TO_VALUE(VT_TRUE));
+            RET_VALUE(VT_TO_VALUE(VT_TRUE))
         }
         baseClass = baseClass->superClass;
     }
 
     // 若未找到满足条件的基类，则设置返回值为 VT_FALSE 并返回
-    RET_VALUE(VT_TO_VALUE(VT_FALSE));
+    RET_VALUE(VT_TO_VALUE(VT_FALSE))
 }
 
 // args[0].toString: 返回 args[0] 所属的 class 的名字
 static bool primObjectToString(VM *vm UNUSED, Value *args) {
     Class *class = args[0].objHeader->class;
     Value nameValue = OBJ_TO_VALUE(class->name);
-    RET_VALUE(nameValue);
+    RET_VALUE(nameValue)
 }
 
 // args[0].type: 返回 args[0] 对象所属的类
 static bool primObjectType(VM *vm, Value *args) {
     Class *class = getClassOfObj(vm, args[0]);
-    RET_OBJ(class);
+    RET_OBJ(class)
 }
 
 /**
@@ -670,22 +671,22 @@ static bool primObjectType(VM *vm, Value *args) {
 // args[0].name: 返回 args[0] 类的名字
 static bool primClassName(VM *vm UNUSED, Value *args) {
     Class *class = VALUE_TO_CLASS(args[0]);
-    RET_OBJ(class->name);
+    RET_OBJ(class->name)
 }
 
 // args[0].toString: 返回 args[0] 类的名字
 static bool primClassToString(VM *vm UNUSED, Value *args) {
     Class *class = VALUE_TO_CLASS(args[0]);
-    RET_OBJ(class->name);
+    RET_OBJ(class->name)
 }
 
 // args[0].supertype: 返回 args[0] 类的基类
 static bool primClassSupertype(VM *vm UNUSED, Value *args) {
     Class *class = VALUE_TO_CLASS(args[0]);
     if (class->superClass != NULL) {
-        RET_OBJ(class->superClass);
+        RET_OBJ(class->superClass)
     }
-    RET_VALUE(VT_TO_VALUE(VT_NULL));
+    RET_VALUE(VT_TO_VALUE(VT_NULL))
 }
 
 /**
@@ -695,7 +696,7 @@ static bool primClassSupertype(VM *vm UNUSED, Value *args) {
 // args[0].same(args[1], args[2]): 返回 args[1] 和 args[2] 是否相等
 static bool primObjectMetaSame(VM *vm UNUSED, Value *args) {
     Value boolValue = BOOL_TO_VALUE(valueIsEqual(args[1], args[2]));
-    RET_VALUE(boolValue);
+    RET_VALUE(boolValue)
 }
 
 /**
@@ -710,13 +711,12 @@ static bool primBoolToString(VM *vm, Value *args) {
     } else {
         objString = newObjString(vm, "false", 5);
     }
-    RET_OBJ(objString);
+    RET_OBJ(objString)
 }
 
-// !args[0]： bool 值取反
+// !args[0]: bool 值取反
 static bool primBoolNot(VM *vm UNUSED, Value *args) {
-    bool value = !VALUE_TO_BOOL(args[0]);
-    RET_BOOL(value);
+    RET_BOOL(!VALUE_TO_BOOL(args[0]))
 }
 
 /**
@@ -736,7 +736,7 @@ static bool primThreadNew(VM *vm, Value *args) {
     // 使stack[0]为接收者,保持栈平衡
     objThread->stack[0] = VT_TO_VALUE(VT_NULL);
     objThread->esp++;
-    RET_OBJ(objThread);
+    RET_OBJ(objThread)
 }
 
 // Thread.abort(err): 以错误信息err为参数退出线程
@@ -751,7 +751,7 @@ static bool primThreadAbort(VM *vm, Value *args) {
 // Thread.current: 返回当前的线程
 // 该方法是脚本中调用 Thread.current 所执行的原生方法
 static bool primThreadCurrent(VM *vm, Value *args UNUSED) {
-    RET_OBJ(vm->curThread);
+    RET_OBJ(vm->curThread)
 }
 
 // Thread.suspend(): 挂起线程，退出解释器
@@ -818,12 +818,12 @@ static bool switchThread(VM *vm, ObjThread *nextThread, Value *args, bool withAr
 
     // 只有已经运行完毕的线程 thread 的 usedFrameNum 才为 0，这种没有执行任务的线程不应该被调用
     if (nextThread->usedFrameNum == 0) {
-        SET_ERROR_FALSE(vm, "a finished thread can`t be switched to!");
+        SET_ERROR_FALSE(vm, "a finished thread can`t be switched to!")
     }
 
     // 如果线程上次运行已经出错了，其 errorObj 就会记录出错对象，已经出错的线程不应该被调用
     if (!VALUE_IS_NULL(nextThread->errorObj)) {
-        SET_ERROR_FALSE(vm, "a aborted thread can`t be switched to!");
+        SET_ERROR_FALSE(vm, "a aborted thread can`t be switched to!")
     }
 
     // 背景知识：
@@ -876,9 +876,9 @@ static bool primThreadIsDone(VM *vm UNUSED, Value *args) {
     // 对于脚本来说，当前方法调用 Thread.isDone 拥有一个参数，即 Thread，也就是 args[0]，isDone 的调用者
     ObjThread *objThread = VALUE_TO_OBJTHREAD(args[0]);
     // 线程运行完毕的两种情况：
-    // 1. 帧栈使用量 usedFramNum 为 0
+    // 1. 帧栈使用量 usedFrameNum 为 0
     // 2. 线程是否有错误出现
-    RET_BOOL(objThread->usedFrameNum == 0 || !VALUE_IS_NULL(objThread->errorObj));
+    RET_BOOL(objThread->usedFrameNum == 0 || !VALUE_IS_NULL(objThread->errorObj))
 }
 
 /**
@@ -893,7 +893,7 @@ static bool primFnNew(VM *vm, Value *args) {
         return false;
 
     // 直接返回函数闭包
-    RET_VALUE(args[1]);
+    RET_VALUE(args[1])
 }
 
 /**
@@ -903,14 +903,14 @@ static bool primFnNew(VM *vm, Value *args) {
 // !null: null 取非得到 true
 // 该方法为 Null 类的实例方法
 static bool primNullNot(VM *vm UNUSED, Value *args UNUSED) {
-    RET_VALUE(BOOL_TO_VALUE(true));
+    RET_VALUE(BOOL_TO_VALUE(true))
 }
 
 // null.toString: null 字符串化
 // 该方法为 Null 类的实例方法
 static bool primNullToString(VM *vm, Value *args UNUSED) {
     ObjString *objString = newObjString(vm, "null", 4);
-    RET_OBJ(objString);
+    RET_OBJ(objString)
 }
 
 /**
@@ -928,10 +928,10 @@ static bool primNumFromString(VM *vm, Value *args) {
 
     // 空字符串返回 RETURN_NULL
     if (objString->value.length == 0) {
-        RET_NULL;
+        RET_NULL
     }
 
-    ASSERT(objString->value.start[objString->value.length] == '\0', "objString don`t teminate!");
+    ASSERT(objString->value.start[objString->value.length] == '\0', "objString don`t terminate!");
 
     errno = 0;
     char *endPtr;
@@ -950,40 +950,38 @@ static bool primNumFromString(VM *vm, Value *args) {
 
     // 如果字符串中不能转换的字符不全是空白，则字符串非法，返回 NULL
     if (endPtr < objString->value.start + objString->value.length) {
-        RET_NULL;
+        RET_NULL
     }
 
     // 至此，检查通过，返回正确结果
-    RET_NUM(num);
+    RET_NUM(num)
 }
 
 // 返回圆周率
 // 该方法是脚本中调用 Num.pi 所执行的原生方法，为类的方法
 static bool primNumPi(VM *vm UNUSED, Value *args UNUSED) {
-    RET_NUM(3.14159265358979323846);
+    RET_NUM(3.14159265358979323846)
 }
 
 // 定义 Num 相关中缀运算符的宏，共性如下：
 // 先校验数字的合法性，然后再用 args[0] 和 args[1] 做中追运算符表示的运算
 // 例如 1 + 2，args[0] 是 1，args[1] 是 2，中缀运算符 operator 是 +，那么表达式的计算公式即 args[0] operator args[1]
-#define PRIM_NUM_INFIX(name, operator, type)           \
-    static bool name(VM *vm, Value *args) {            \
-        if (!validateNum(vm, args[1])) {               \
-            return false;                              \
-        }                                              \
-        uint32_t leftOperand = VALUE_TO_NUM(args[0]);  \
-        uint32_t rightOperand = VALUE_TO_NUM(args[1]); \
-        RET_##type(leftOperand operator rightOperand); \
+#define PRIM_NUM_INFIX(name, operator, type)                              \
+    static bool name(VM *vm, Value *args) {                               \
+        if (!validateNum(vm, args[1])) {                                  \
+            return false;                                                 \
+        }                                                                 \
+        RET_##type(VALUE_TO_NUM(args[0]) operator VALUE_TO_NUM(args[1])); \
     }
 
-PRIM_NUM_INFIX(primNumPlus, +, NUM);
-PRIM_NUM_INFIX(primNumMinus, -, NUM);
-PRIM_NUM_INFIX(primNumMul, *, NUM);
-PRIM_NUM_INFIX(primNumDiv, /, NUM);
-PRIM_NUM_INFIX(primNumGt, >, BOOL);
-PRIM_NUM_INFIX(primNumGe, >=, BOOL);
-PRIM_NUM_INFIX(primNumLt, <, BOOL);
-PRIM_NUM_INFIX(primNumLe, <=, BOOL);
+PRIM_NUM_INFIX(primNumPlus, +, NUM)
+PRIM_NUM_INFIX(primNumMinus, -, NUM)
+PRIM_NUM_INFIX(primNumMul, *, NUM)
+PRIM_NUM_INFIX(primNumDiv, /, NUM)
+PRIM_NUM_INFIX(primNumGt, >, BOOL)
+PRIM_NUM_INFIX(primNumGe, >=, BOOL)
+PRIM_NUM_INFIX(primNumLt, <, BOOL)
+PRIM_NUM_INFIX(primNumLe, <=, BOOL)
 #undef PRIM_NUM_INFIX
 
 // 定义 Num 相关位操作的宏，原理和上面一样
@@ -997,10 +995,10 @@ PRIM_NUM_INFIX(primNumLe, <=, BOOL);
         RET_NUM(leftOperand operator rightOperand);    \
     }
 
-PRIM_NUM_BIT(primNumBitAnd, &);
-PRIM_NUM_BIT(primNumBitOr, |);
-PRIM_NUM_BIT(primNumBitShiftRight, >>);
-PRIM_NUM_BIT(primNumBitShiftLeft, <<);
+PRIM_NUM_BIT(primNumBitAnd, &)
+PRIM_NUM_BIT(primNumBitOr, |)
+PRIM_NUM_BIT(primNumBitShiftRight, >>)
+PRIM_NUM_BIT(primNumBitShiftLeft, <<)
 #undef PRIM_NUM_BIT
 
 // 使用数学库函数的宏
@@ -1009,17 +1007,17 @@ PRIM_NUM_BIT(primNumBitShiftLeft, <<);
         RET_NUM(mathFn(VALUE_TO_NUM(args[0])));    \
     }
 
-PRIM_NUM_MATH_FN(primNumAbs, fabs);
-PRIM_NUM_MATH_FN(primNumAcos, acos);
-PRIM_NUM_MATH_FN(primNumAsin, asin);
-PRIM_NUM_MATH_FN(primNumAtan, atan);
-PRIM_NUM_MATH_FN(primNumCeil, ceil);
-PRIM_NUM_MATH_FN(primNumCos, cos);
-PRIM_NUM_MATH_FN(primNumFloor, floor);
-PRIM_NUM_MATH_FN(primNumNegate, -);
-PRIM_NUM_MATH_FN(primNumSin, sin);
-PRIM_NUM_MATH_FN(primNumSqrt, sqrt);
-PRIM_NUM_MATH_FN(primNumTan, tan);
+PRIM_NUM_MATH_FN(primNumAbs, fabs)
+PRIM_NUM_MATH_FN(primNumAcos, acos)
+PRIM_NUM_MATH_FN(primNumAsin, asin)
+PRIM_NUM_MATH_FN(primNumAtan, atan)
+PRIM_NUM_MATH_FN(primNumCeil, ceil)
+PRIM_NUM_MATH_FN(primNumCos, cos)
+PRIM_NUM_MATH_FN(primNumFloor, floor)
+PRIM_NUM_MATH_FN(primNumNegate, -)
+PRIM_NUM_MATH_FN(primNumSin, sin)
+PRIM_NUM_MATH_FN(primNumSqrt, sqrt)
+PRIM_NUM_MATH_FN(primNumTan, tan)
 #undef PRIM_NUM_MATH_FN
 
 // 数字取模
@@ -1028,13 +1026,13 @@ static bool primNumMod(VM *vm UNUSED, Value *args) {
     if (!validateNum(vm, args[1])) {
         return false;
     }
-    RET_NUM(fmod(VALUE_TO_NUM(args[0]), VALUE_TO_NUM(args[1])));
+    RET_NUM(fmod(VALUE_TO_NUM(args[0]), VALUE_TO_NUM(args[1])))
 }
 
 // 数字取反
 // 该方法是脚本中调用 ~num 所执行的原生方法，该方法为实例方法
 static bool primNumBitNot(VM *vm UNUSED, Value *args) {
-    RET_NUM(~(uint32_t)VALUE_TO_NUM(args[0]));
+    RET_NUM(~(uint32_t)VALUE_TO_NUM(args[0]))
 }
 
 // 数字获取范围
@@ -1046,7 +1044,7 @@ static bool primNumRange(VM *vm UNUSED, Value *args) {
 
     double from = VALUE_TO_NUM(args[0]);
     double to = VALUE_TO_NUM(args[1]);
-    RET_OBJ(newObjRange(vm, from, to));
+    RET_OBJ(newObjRange(vm, from, to))
 }
 
 // 取数字的整数部分
@@ -1054,20 +1052,20 @@ static bool primNumRange(VM *vm UNUSED, Value *args) {
 static bool primNumTruncate(VM *vm UNUSED, Value *args) {
     double integer;
     modf(VALUE_TO_NUM(args[0]), &integer);
-    RET_NUM(integer);
+    RET_NUM(integer)
 }
 
 // 返回小数部分
 // 该方法是脚本中调用 num.fraction 所执行的原生方法，该方法为实例方法
 static bool primNumFraction(VM *vm UNUSED, Value *args) {
     double dummyInteger;
-    RET_NUM(modf(VALUE_TO_NUM(args[0]), &dummyInteger));
+    RET_NUM(modf(VALUE_TO_NUM(args[0]), &dummyInteger))
 }
 
 // 判断数字是否无穷大，不区分正负无穷大
 // 该方法是脚本中调用 num.isInfinity 所执行的原生方法，该方法为实例方法
 static bool primNumIsInfinity(VM *vm UNUSED, Value *args) {
-    RET_BOOL(isinf(VALUE_TO_NUM(args[0])));
+    RET_BOOL(isinf(VALUE_TO_NUM(args[0])))
 }
 
 // 判断是否为整数
@@ -1076,40 +1074,40 @@ static bool primNumIsInteger(VM *vm UNUSED, Value *args) {
     double num = VALUE_TO_NUM(args[0]);
     // 如果是 NaN (不是一个数字)或无限大的数字就返回 false
     if (isnan(num) || isinf(num)) {
-        RET_FALSE;
+        RET_FALSE
     }
-    RET_BOOL(trunc(num) == num);
+    RET_BOOL(trunc(num) == num)
 }
 
 // 判断数字是否为 NaN
 // 该方法是脚本中调用 num.isNan 所执行的原生方法，该方法为实例方法
 static bool primNumIsNan(VM *vm UNUSED, Value *args) {
-    RET_BOOL(isnan(VALUE_TO_NUM(args[0])));
+    RET_BOOL(isnan(VALUE_TO_NUM(args[0])))
 }
 
 // 数字转换为字符串
 // 该方法是脚本中调用 num.toString 所执行的原生方法，该方法为实例方法
 static bool primNumToString(VM *vm UNUSED, Value *args) {
-    RET_OBJ(num2str(vm, VALUE_TO_NUM(args[0])));
+    RET_OBJ(num2str(vm, VALUE_TO_NUM(args[0])))
 }
 
 // 判断两个数字是否相等
 // 该方法是脚本中调用 num1 == num2 所执行的原生方法，该方法为实例方法
 static bool primNumEqual(VM *vm UNUSED, Value *args) {
     if (!validateNum(vm, args[1])) {
-        RET_FALSE;
+        RET_FALSE
     }
 
-    RET_BOOL(VALUE_TO_NUM(args[0]) == VALUE_TO_NUM(args[1]));
+    RET_BOOL(VALUE_TO_NUM(args[0]) == VALUE_TO_NUM(args[1]))
 }
 
 // 判断两个数字是否不等
 // 该方法是脚本中调用 num1 != num2 所执行的原生方法，该方法为实例方法
 static bool primNumNotEqual(VM *vm UNUSED, Value *args) {
     if (!validateNum(vm, args[1])) {
-        RET_TRUE;
+        RET_TRUE
     }
-    RET_BOOL(VALUE_TO_NUM(args[0]) != VALUE_TO_NUM(args[1]));
+    RET_BOOL(VALUE_TO_NUM(args[0]) != VALUE_TO_NUM(args[1]))
 }
 
 /**
@@ -1125,18 +1123,18 @@ static bool primStringFromCodePoint(VM *vm, Value *args) {
 
     int codePoint = (int)VALUE_TO_NUM(args[1]);
     if (codePoint < 0) {
-        SET_ERROR_FALSE(vm, "code point can`t be negetive!");
+        SET_ERROR_FALSE(vm, "code point can`t be negative!")
     }
 
     if (codePoint > 0x10ffff) {
-        SET_ERROR_FALSE(vm, "code point must be between 0 and 0x10ffff!");
+        SET_ERROR_FALSE(vm, "code point must be between 0 and 0x10ffff!")
     }
 
-    RET_VALUE(makeStringFromCodePoint(vm, codePoint));
+    RET_VALUE(makeStringFromCodePoint(vm, codePoint))
 }
 
 // 字符串相加
-// 该方法是脚本中调用 oargs[0] +args[1] 所执行的原生方法，该方法为实例方法
+// 该方法是脚本中调用 args[0] +args[1] 所执行的原生方法，该方法为实例方法
 static bool primStringPlus(VM *vm, Value *args) {
     if (!validateString(vm, args[1])) {
         return false;
@@ -1165,7 +1163,7 @@ static bool primStringPlus(VM *vm, Value *args) {
     // 根据字符串对象中的值 result->value 设置对应的哈希值给 result->hashCode
     hashObjString(result);
 
-    RET_OBJ(result);
+    RET_OBJ(result)
 }
 
 // 索引字符串
@@ -1183,12 +1181,12 @@ static bool primStringSubscript(VM *vm, Value *args) {
             return false;
         }
         // 若数字合法，则调用 stringCodePointAt 为该索引处的字符生成字符串对象并返回
-        RET_VALUE(stringCodePointAt(vm, objString, index));
+        RET_VALUE(stringCodePointAt(vm, objString, index))
     }
 
     // 2. 如果索引不是数字，必定为 objRange 对象，否则报错
     if (!VALUE_IS_OBJRANGE(args[1])) {
-        SET_ERROR_FALSE(vm, "subscript should be integer or range!");
+        SET_ERROR_FALSE(vm, "subscript should be integer or range!")
     }
 
     // direction是索引的方向，1 表示正方向，即索引值递增，-1表示反方向，即索引值递减
@@ -1203,7 +1201,7 @@ static bool primStringSubscript(VM *vm, Value *args) {
         return false;
     }
     // 从字符串 sourceStr 中获取起始为 startIndex，方向为 direction 的 count 个字符，创建字符串并返回
-    RET_OBJ(newObjStringFromSub(vm, objString, startIndex, count, direction));
+    RET_OBJ(newObjStringFromSub(vm, objString, startIndex, count, direction))
 }
 
 // 获取字符串中指定索引的字符对应的字节
@@ -1216,14 +1214,14 @@ static bool primStringByteAt(VM *vm UNUSED, Value *args) {
         return false;
     }
     // 如果索引合法，则返回对应字符的数字形式
-    RET_NUM((uint8_t)objString->value.start[index]);
+    RET_NUM((uint8_t)objString->value.start[index])
 }
 
 // 获取字符串对应的字节数
 // 该方法是脚本中调用 objString.byteCount_ 所执行的原生方法，该方法为实例方法
 static bool primStringByteCount(VM *vm UNUSED, Value *args) {
     ObjString *objString = VALUE_TO_OBJSTR(args[0]);
-    RET_NUM(objString->value.length);
+    RET_NUM(objString->value.length)
 }
 
 // 获取字符串中指定索引的字符对应的码点
@@ -1240,11 +1238,11 @@ static bool primStringCodePointAt(VM *vm UNUSED, Value *args) {
     if ((bytes[index] & 0xc0) == 0x80) {
         // 如果 index 指向的并不是 UTF-8 编码的最高字节
         // 而是后面的低字节,返回 -1 提示用户
-        RET_NUM(-1);
+        RET_NUM(-1)
     }
 
     // 调用 decodeUtf8 解码对应字符并返回
-    RET_NUM(decodeUtf8((uint8_t *)objString->value.start + index, objString->value.length - index));
+    RET_NUM(decodeUtf8((uint8_t *)objString->value.start + index, objString->value.length - index))
 }
 
 // 判断字符串 args[0] 中是否包含子字符串 args[1]
@@ -1259,7 +1257,7 @@ static bool primStringContains(VM *vm UNUSED, Value *args) {
     ObjString *pattern = VALUE_TO_OBJSTR(args[1]);
 
     // 调用 findString 来判断字符串 args[0] 中是否包含子字符串 args[1]
-    RET_BOOL(findString(objString, pattern) != -1);
+    RET_BOOL(findString(objString, pattern) != -1)
 }
 
 // 检索字符串 args[0] 中子串 args[1] 的起始下标
@@ -1275,12 +1273,12 @@ static bool primStringIndexOf(VM *vm UNUSED, Value *args) {
 
     // 若 pattern 比源串 objString 还长，源串 objString 必然不包括 pattern
     if (pattern->value.length > objString->value.length) {
-        RET_FALSE;
+        RET_FALSE
     }
 
     // 否则调用 findString 来检索字符串 args[0] 中子串 args[1] 的起始下标
     int index = findString(objString, pattern);
-    RET_NUM(index);
+    RET_NUM(index)
 }
 
 // 判断字符串 args[0] 是否以字符串 args[1] 为开始
@@ -1296,11 +1294,11 @@ static bool primStringStartsWith(VM *vm UNUSED, Value *args) {
 
     // 若 pattern 比源串 objString 还长，源串 objString 必然不包括 pattern
     if (pattern->value.length > objString->value.length) {
-        RET_FALSE;
+        RET_FALSE
     }
 
     // 否则调用 memcmp 函数比较相同位置的字符串是否相同
-    RET_BOOL(memcmp(objString->value.start, pattern->value.start, pattern->value.length) == 0);
+    RET_BOOL(memcmp(objString->value.start, pattern->value.start, pattern->value.length) == 0)
 }
 
 // 判断字符串 args[0] 是否以字符串 args[1] 为结束
@@ -1316,18 +1314,18 @@ static bool primStringEndsWith(VM *vm UNUSED, Value *args) {
 
     // 若 pattern 比源串 objString 还长，源串 objString 必然不包括 pattern
     if (pattern->value.length > objString->value.length) {
-        RET_FALSE;
+        RET_FALSE
     }
 
     // 否则调用 memcmp 函数比较相同位置的字符串是否相同
     char *cmpIdx = objString->value.start + objString->value.length - pattern->value.length;
-    RET_BOOL(memcmp(cmpIdx, pattern->value.start, pattern->value.length) == 0);
+    RET_BOOL(memcmp(cmpIdx, pattern->value.start, pattern->value.length) == 0)
 }
 
 // 字符串输出自己
 // 该方法是脚本中调用 objString.toString() 所执行的原生方法，该方法为实例方法
 static bool primStringToString(VM *vm UNUSED, Value *args) {
-    RET_VALUE(args[0]);
+    RET_VALUE(args[0])
 }
 
 /**
@@ -1338,7 +1336,7 @@ static bool primStringToString(VM *vm UNUSED, Value *args) {
 // 该方法是脚本中调用 ObjList.new() 所执行的原生方法，该方法为类方法
 static bool primListNew(VM *vm, Value *args UNUSED) {
     // 返回列表自身
-    RET_OBJ(newObjList(vm, 0));
+    RET_OBJ(newObjList(vm, 0))
 }
 
 // 索引 list 中的元素（索引可以是数字或者 objRange 实例）
@@ -1355,12 +1353,12 @@ static bool primListSubscript(VM *vm, Value *args) {
             return false;
         }
         // 若数字合法，则获取该元素并返回
-        RET_VALUE(objList->elements.datas[index]);
+        RET_VALUE(objList->elements.datas[index])
     }
 
     // 2. 如果索引不是数字，必定为 objRange 对象，否则报错
     if (!VALUE_IS_OBJRANGE(args[1])) {
-        SET_ERROR_FALSE(vm, "subscript should be integer or range!");
+        SET_ERROR_FALSE(vm, "subscript should be integer or range!")
     }
 
     // direction是索引的方向，1 表示正方向，即索引值递增，-1表示反方向，即索引值递减
@@ -1381,7 +1379,7 @@ static bool primListSubscript(VM *vm, Value *args) {
         result->elements.datas[idx] = objList->elements.datas[startIndex + idx * direction];
         idx++;
     }
-    RET_OBJ(result);
+    RET_OBJ(result)
 }
 
 // 对 list 中某个索引的元素赋值（索引只能是数字）
@@ -1400,7 +1398,7 @@ static bool primListSubscriptSetter(VM *vm UNUSED, Value *args) {
     objList->elements.datas[index] = args[2];
 
     // 把要赋的值 args[2] 做为返回值
-    RET_VALUE(args[2]);
+    RET_VALUE(args[2])
 }
 
 // 向 list 后面追加元素
@@ -1409,7 +1407,7 @@ static bool primListAdd(VM *vm, Value *args) {
     ObjList *objList = VALUE_TO_OBJLIST(args[0]);
     ValueBufferAdd(vm, &objList->elements, args[1]);
     // 将要追加的元素 args[1] 做为返回值
-    RET_VALUE(args[1]);
+    RET_VALUE(args[1])
 }
 
 // 向 list 后面追加元素
@@ -1419,7 +1417,7 @@ static bool primListAddCore(VM *vm, Value *args) {
     ObjList *objList = VALUE_TO_OBJLIST(args[0]);
     ValueBufferAdd(vm, &objList->elements, args[1]);
     // 返回列表自身
-    RET_VALUE(args[0]);
+    RET_VALUE(args[0])
 }
 
 // 向 list 中某个位置插入元素
@@ -1433,7 +1431,7 @@ static bool primListInsert(VM *vm, Value *args) {
     }
     insertElement(vm, objList, index, args[2]);
     // 元素 args[2] 做为返回值
-    RET_VALUE(args[2]);
+    RET_VALUE(args[2])
 }
 
 // 删除 list 中某个位置的元素
@@ -1447,7 +1445,7 @@ static bool primListRemoveAt(VM *vm, Value *args) {
         return false;
     }
     // 被删除的元素做为返回值
-    RET_VALUE(removeElement(vm, objList, index));
+    RET_VALUE(removeElement(vm, objList, index))
 }
 
 // 清空 list 中所有元素
@@ -1455,14 +1453,14 @@ static bool primListRemoveAt(VM *vm, Value *args) {
 static bool primListClear(VM *vm, Value *args) {
     ObjList *objList = VALUE_TO_OBJLIST(args[0]);
     ValueBufferClear(vm, &objList->elements);
-    RET_NULL;
+    RET_NULL
 }
 
 // 返回 list 的元素个数
 // 该方法是脚本中调用 objList.count 所执行的原生方法，该方法为实例方法
 static bool primListCount(VM *vm UNUSED, Value *args) {
     ObjList *objList = VALUE_TO_OBJLIST(args[0]);
-    RET_NUM(objList->elements.count);
+    RET_NUM(objList->elements.count)
 }
 
 /**
@@ -1472,7 +1470,7 @@ static bool primListCount(VM *vm UNUSED, Value *args) {
 // 创建 map 实例
 // 该方法是脚本中调用 ObjMap.new() 所执行的原生方法，该方法为类方法
 static bool primMapNew(VM *vm, Value *args UNUSED) {
-    RET_OBJ(newObjMap(vm));
+    RET_OBJ(newObjMap(vm))
 }
 
 // 获取 map[key] 对应的 value
@@ -1491,9 +1489,9 @@ static bool primMapSubscript(VM *vm, Value *args) {
 
     // 若没有相应的 key 则返回 NULL
     if (VALUE_IS_UNDEFINED(value)) {
-        RET_NULL;
+        RET_NULL
     }
-    RET_VALUE(value);
+    RET_VALUE(value)
 }
 
 // 对 map[key] 赋值
@@ -1509,7 +1507,7 @@ static bool primMapSubscriptSetter(VM *vm, Value *args) {
 
     // 在 map 中将 key 和 value 关联，即 map[key] = value
     mapSet(vm, objMap, args[1], args[2]);
-    RET_VALUE(args[2]);
+    RET_VALUE(args[2])
 }
 
 // 在 map 中添加 key-value 对并返回 map 自身
@@ -1527,7 +1525,7 @@ static bool primMapAddCore(VM *vm, Value *args) {
     // 在 map 中将 key 和 value 关联，即 map[key] = value
     mapSet(vm, objMap, args[1], args[2]);
     // 返回 map 对象自身
-    RET_VALUE(args[0]);
+    RET_VALUE(args[0])
 }
 
 // 删除 map 中对应 key 的 entry（即 key-value 对）
@@ -1538,14 +1536,14 @@ static bool primMapRemove(VM *vm, Value *args) {
         return false;
     }
 
-    RET_VALUE(removeKey(vm, VALUE_TO_OBJMAP(args[0]), args[1]));
+    RET_VALUE(removeKey(vm, VALUE_TO_OBJMAP(args[0]), args[1]))
 }
 
 // 清空 map
 // 该方法是脚本中调用 objMap.clear() 所执行的原生方法，该方法为实例方法
 static bool primMapClear(VM *vm, Value *args) {
     clearMap(vm, VALUE_TO_OBJMAP(args[0]));
-    RET_NULL;
+    RET_NULL
 }
 
 // 判断 map 即 args[0] 是否包含 key 即 args[1]
@@ -1557,14 +1555,14 @@ static bool primMapContainsKey(VM *vm, Value *args) {
     }
 
     // 从 map 中获取该 key 对应的 value，如果 value 存在则 key 存在，否则不存在
-    RET_BOOL(!VALUE_IS_UNDEFINED(mapGet(VALUE_TO_OBJMAP(args[0]), args[1])));
+    RET_BOOL(!VALUE_IS_UNDEFINED(mapGet(VALUE_TO_OBJMAP(args[0]), args[1])))
 }
 
 // 获取 map 中 entry 个数，即 key-value 的对数
 // 该方法是脚本中调用 objMap.count 所执行的原生方法，该方法为实例方法
 static bool primMapCount(VM *vm UNUSED, Value *args) {
     ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
-    RET_NUM(objMap->count);
+    RET_NUM(objMap->count)
 }
 
 /**
@@ -1575,28 +1573,28 @@ static bool primMapCount(VM *vm UNUSED, Value *args) {
 // 该方法是脚本中调用 objRange.from 所执行的原生方法，该方法为实例方法
 static bool primRangeFrom(VM *vm UNUSED, Value *args) {
     ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
-    RET_NUM(objRange->from);
+    RET_NUM(objRange->from)
 }
 
 // 返回 range 实例对象的 to 属性的值
 // 该方法是脚本中调用 objRange.to 所执行的原生方法，该方法为实例方法
 static bool primRangeTo(VM *vm UNUSED, Value *args) {
     ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
-    RET_NUM(objRange->to);
+    RET_NUM(objRange->to)
 }
 
 // 返回 range 实例对象的 from 属性和 to 属性的中的较小值
 // 该方法是脚本中调用 objRange.min 所执行的原生方法，该方法为实例方法
 static bool primRangeMin(VM *vm UNUSED, Value *args) {
     ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
-    RET_NUM(fmin(objRange->from, objRange->to));
+    RET_NUM(fmin(objRange->from, objRange->to))
 }
 
 // 返回 range 实例对象的 from 属性和 to 属性的中的较大值
 // 该方法是脚本中调用 objRange.max 所执行的原生方法，该方法为实例方法
 static bool primRangeMax(VM *vm UNUSED, Value *args) {
     ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
-    RET_NUM(fmax(objRange->from, objRange->to));
+    RET_NUM(fmax(objRange->from, objRange->to))
 }
 
 /**
@@ -1606,14 +1604,14 @@ static bool primRangeMax(VM *vm UNUSED, Value *args) {
 // 返回以秒为单位的系统时钟
 // 该方法是脚本中调用 System.clock 所执行的原生方法，该方法为类方法
 static bool primSystemClock(VM *vm UNUSED, Value *args UNUSED) {
-    RET_NUM((double)time(NULL));
+    RET_NUM((double)time(NULL))
 }
 
 // 启动 gc
 // 该方法是脚本中调用 System.gc() 所执行的原生方法，该方法为类方法
 static bool primSystemGC(VM *vm, Value *args) {
     // startGC(vm);
-    RET_NULL;
+    RET_NULL
 }
 
 // 导入并编译模块（即将模块挂载到 vm->allModules）
@@ -1628,7 +1626,7 @@ static bool primSystemImportModule(VM *vm, Value *args) {
 
     // 若模块已经导入（模块导入时 importModule 返回 NULL），则返回 NULL
     if (VALUE_IS_NULL(result)) {
-        RET_NULL;
+        RET_NULL
     }
 
     // 若模块编译过程中出了问题，则返回 false，通知虚拟机切换线程
@@ -1664,7 +1662,7 @@ static bool primSystemGetModuleVariable(VM *vm, Value *args) {
         return false;
     }
 
-    RET_VALUE(result);
+    RET_VALUE(result)
 }
 
 // 输出字符串
@@ -1675,7 +1673,7 @@ static bool primSystemWriteString(VM *vm UNUSED, Value *args) {
     ASSERT(objString->value.start[objString->value.length] == '\0', "string isn`t terminated!");
 
     printString(objString->value.start);
-    RET_VALUE(args[1]);
+    RET_VALUE(args[1])
 }
 
 /**
@@ -1695,20 +1693,20 @@ void buildCore(VM *vm) {
     // 1. 创建 objectClass 类，是所有类的基类，所有类都会直接或间接继承这个类
     vm->objectClass = defineClass(vm, coreModule, "object");
     // 绑定对象的原生方法到 objectClass 类
-    PRIM_METHOD_BIND(vm->objectClass, "!", primObjectNot);
-    PRIM_METHOD_BIND(vm->objectClass, "==(_)", primObjectEqual);
-    PRIM_METHOD_BIND(vm->objectClass, "!=(_)", primObjectNotEqual);
-    PRIM_METHOD_BIND(vm->objectClass, "is(_)", primObjectIs);
-    PRIM_METHOD_BIND(vm->objectClass, "toString", primObjectToString);
-    PRIM_METHOD_BIND(vm->objectClass, "type", primObjectType);
+    PRIM_METHOD_BIND(vm->objectClass, "!", primObjectNot)
+    PRIM_METHOD_BIND(vm->objectClass, "==(_)", primObjectEqual)
+    PRIM_METHOD_BIND(vm->objectClass, "!=(_)", primObjectNotEqual)
+    PRIM_METHOD_BIND(vm->objectClass, "is(_)", primObjectIs)
+    PRIM_METHOD_BIND(vm->objectClass, "toString", primObjectToString)
+    PRIM_METHOD_BIND(vm->objectClass, "type", primObjectType)
 
     // 2. 创建 classOfClass 类，是所有元信息类的基类和元信息类
     // 注：元信息类，用于描述普通类的信息的，主要保存类的方法，即静态方法
     vm->classOfClass = defineClass(vm, coreModule, "class");
     // 绑定类的原生方法到 classOfClass 类
-    PRIM_METHOD_BIND(vm->classOfClass, "name", primClassName);
-    PRIM_METHOD_BIND(vm->classOfClass, "supertype", primClassSupertype);
-    PRIM_METHOD_BIND(vm->classOfClass, "toString", primClassToString);
+    PRIM_METHOD_BIND(vm->classOfClass, "name", primClassName)
+    PRIM_METHOD_BIND(vm->classOfClass, "supertype", primClassSupertype)
+    PRIM_METHOD_BIND(vm->classOfClass, "toString", primClassToString)
 
     // 同时 classOfClass 类又继承了 objectClass 类，所以 objectClass 类是所有类的基类
     bindSuperClass(vm, vm->classOfClass, vm->objectClass);
@@ -1717,7 +1715,7 @@ void buildCore(VM *vm) {
     // 其无需挂在到 vm 上
     Class *objectMetaClass = defineClass(vm, coreModule, "objectMeta");
     // 绑定元信息类的原生方法到 objectMetaClass 类
-    PRIM_METHOD_BIND(objectMetaClass, "same(_,_)", primObjectMetaSame);
+    PRIM_METHOD_BIND(objectMetaClass, "same(_,_)", primObjectMetaSame)
 
     // 同时 objectMetaClass 类也继承了 classOfClass 类，即 classOfClass 类是所有元信息类的基类和元信息类
     bindSuperClass(vm, objectMetaClass, vm->classOfClass);
@@ -1735,26 +1733,26 @@ void buildCore(VM *vm) {
 
     /* Bool 类定义在 core.script.inc，将其挂载到 vm->boolClass，并绑定原生方法 */
     vm->boolClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "bool"));
-    PRIM_METHOD_BIND(vm->boolClass, "toString", primBoolToString);
-    PRIM_METHOD_BIND(vm->boolClass, "!", primBoolNot);
+    PRIM_METHOD_BIND(vm->boolClass, "toString", primBoolToString)
+    PRIM_METHOD_BIND(vm->boolClass, "!", primBoolNot)
 
     /* Thread 类定义在 core.script.inc，将其挂载到 vm->threadClass，并绑定原生方法 */
     vm->threadClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Thread"));
     // 以下是 Thread 类方法
-    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "new(_)", primThreadNew);
-    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "abort(_)", primThreadAbort);
-    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "current", primThreadCurrent);
-    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "suspend()", primThreadSuspend);
-    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "yield(_)", primThreadYieldWithArg);
-    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "yield()", primThreadYieldWithoutArg);
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "new(_)", primThreadNew)
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "abort(_)", primThreadAbort)
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "current", primThreadCurrent)
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "suspend()", primThreadSuspend)
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "yield(_)", primThreadYieldWithArg)
+    PRIM_METHOD_BIND(vm->threadClass->objHeader.class, "yield()", primThreadYieldWithoutArg)
     // 以下是 Thread 实例方法
-    PRIM_METHOD_BIND(vm->threadClass, "call()", primThreadCallWithoutArg);
-    PRIM_METHOD_BIND(vm->threadClass, "call(_)", primThreadCallWithArg);
-    PRIM_METHOD_BIND(vm->threadClass, "isDone", primThreadIsDone);
+    PRIM_METHOD_BIND(vm->threadClass, "call()", primThreadCallWithoutArg)
+    PRIM_METHOD_BIND(vm->threadClass, "call(_)", primThreadCallWithArg)
+    PRIM_METHOD_BIND(vm->threadClass, "isDone", primThreadIsDone)
 
     /* Fn 类定义在 core.script.inc，将其挂载到 vm->fnClass，并绑定原生方法 */
     vm->fnClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Fn"));
-    PRIM_METHOD_BIND(vm->fnClass->objHeader.class, "new(_)", primFnNew);
+    PRIM_METHOD_BIND(vm->fnClass->objHeader.class, "new(_)", primFnNew)
 
     // 绑定 call 的重载方法
     bindFnOverloadCall(vm, "call()");
@@ -1777,116 +1775,116 @@ void buildCore(VM *vm) {
 
     /* Null 类定义在 core.script.inc，将其挂载到 vm->nullClass，并绑定原生方法 */
     vm->nullClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Null"));
-    PRIM_METHOD_BIND(vm->nullClass, "!", primNullNot);
-    PRIM_METHOD_BIND(vm->nullClass, "toString", primNullToString);
+    PRIM_METHOD_BIND(vm->nullClass, "!", primNullNot)
+    PRIM_METHOD_BIND(vm->nullClass, "toString", primNullToString)
 
     /* Num 类定义在 core.script.inc，将其挂载到 vm->numClass，并绑定原生方法 */
     vm->numClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Num"));
     // 以下是 Num 类方法
-    PRIM_METHOD_BIND(vm->numClass->objHeader.class, "fromString(_)", primNumFromString);
-    PRIM_METHOD_BIND(vm->numClass->objHeader.class, "pi", primNumPi);
+    PRIM_METHOD_BIND(vm->numClass->objHeader.class, "fromString(_)", primNumFromString)
+    PRIM_METHOD_BIND(vm->numClass->objHeader.class, "pi", primNumPi)
     // 以下是 Num 实例方法
-    PRIM_METHOD_BIND(vm->numClass, "+(_)", primNumPlus);
-    PRIM_METHOD_BIND(vm->numClass, "-(_)", primNumMinus);
-    PRIM_METHOD_BIND(vm->numClass, "*(_)", primNumMul);
-    PRIM_METHOD_BIND(vm->numClass, "/(_)", primNumDiv);
-    PRIM_METHOD_BIND(vm->numClass, ">(_)", primNumGt);
-    PRIM_METHOD_BIND(vm->numClass, ">=(_)", primNumGe);
-    PRIM_METHOD_BIND(vm->numClass, "<(_)", primNumLt);
-    PRIM_METHOD_BIND(vm->numClass, "<=(_)", primNumLe);
-    PRIM_METHOD_BIND(vm->numClass, "&(_)", primNumBitAnd);
-    PRIM_METHOD_BIND(vm->numClass, "|(_)", primNumBitOr);
-    PRIM_METHOD_BIND(vm->numClass, ">>(_)", primNumBitShiftRight);
-    PRIM_METHOD_BIND(vm->numClass, "<<(_)", primNumBitShiftLeft);
-    PRIM_METHOD_BIND(vm->numClass, "abs", primNumAbs);
-    PRIM_METHOD_BIND(vm->numClass, "acos", primNumAcos);
-    PRIM_METHOD_BIND(vm->numClass, "asin", primNumAsin);
-    PRIM_METHOD_BIND(vm->numClass, "atan", primNumAtan);
-    PRIM_METHOD_BIND(vm->numClass, "ceil", primNumCeil);
-    PRIM_METHOD_BIND(vm->numClass, "cos", primNumCos);
-    PRIM_METHOD_BIND(vm->numClass, "floor", primNumFloor);
-    PRIM_METHOD_BIND(vm->numClass, "-", primNumNegate);
-    PRIM_METHOD_BIND(vm->numClass, "sin", primNumSin);
-    PRIM_METHOD_BIND(vm->numClass, "sqrt", primNumSqrt);
-    PRIM_METHOD_BIND(vm->numClass, "tan", primNumTan);
-    PRIM_METHOD_BIND(vm->numClass, "%(_)", primNumMod);
-    PRIM_METHOD_BIND(vm->numClass, "~", primNumBitNot);
-    PRIM_METHOD_BIND(vm->numClass, "..(_)", primNumRange);
-    PRIM_METHOD_BIND(vm->numClass, "truncate", primNumTruncate);
-    PRIM_METHOD_BIND(vm->numClass, "fraction", primNumFraction);
-    PRIM_METHOD_BIND(vm->numClass, "isInfinity", primNumIsInfinity);
-    PRIM_METHOD_BIND(vm->numClass, "isInteger", primNumIsInteger);
-    PRIM_METHOD_BIND(vm->numClass, "isNan", primNumIsNan);
-    PRIM_METHOD_BIND(vm->numClass, "toString", primNumToString);
-    PRIM_METHOD_BIND(vm->numClass, "==(_)", primNumEqual);
-    PRIM_METHOD_BIND(vm->numClass, "!=(_)", primNumNotEqual);
+    PRIM_METHOD_BIND(vm->numClass, "+(_)", primNumPlus)
+    PRIM_METHOD_BIND(vm->numClass, "-(_)", primNumMinus)
+    PRIM_METHOD_BIND(vm->numClass, "*(_)", primNumMul)
+    PRIM_METHOD_BIND(vm->numClass, "/(_)", primNumDiv)
+    PRIM_METHOD_BIND(vm->numClass, ">(_)", primNumGt)
+    PRIM_METHOD_BIND(vm->numClass, ">=(_)", primNumGe)
+    PRIM_METHOD_BIND(vm->numClass, "<(_)", primNumLt)
+    PRIM_METHOD_BIND(vm->numClass, "<=(_)", primNumLe)
+    PRIM_METHOD_BIND(vm->numClass, "&(_)", primNumBitAnd)
+    PRIM_METHOD_BIND(vm->numClass, "|(_)", primNumBitOr)
+    PRIM_METHOD_BIND(vm->numClass, ">>(_)", primNumBitShiftRight)
+    PRIM_METHOD_BIND(vm->numClass, "<<(_)", primNumBitShiftLeft)
+    PRIM_METHOD_BIND(vm->numClass, "abs", primNumAbs)
+    PRIM_METHOD_BIND(vm->numClass, "acos", primNumAcos)
+    PRIM_METHOD_BIND(vm->numClass, "asin", primNumAsin)
+    PRIM_METHOD_BIND(vm->numClass, "atan", primNumAtan)
+    PRIM_METHOD_BIND(vm->numClass, "ceil", primNumCeil)
+    PRIM_METHOD_BIND(vm->numClass, "cos", primNumCos)
+    PRIM_METHOD_BIND(vm->numClass, "floor", primNumFloor)
+    PRIM_METHOD_BIND(vm->numClass, "-", primNumNegate)
+    PRIM_METHOD_BIND(vm->numClass, "sin", primNumSin)
+    PRIM_METHOD_BIND(vm->numClass, "sqrt", primNumSqrt)
+    PRIM_METHOD_BIND(vm->numClass, "tan", primNumTan)
+    PRIM_METHOD_BIND(vm->numClass, "%(_)", primNumMod)
+    PRIM_METHOD_BIND(vm->numClass, "~", primNumBitNot)
+    PRIM_METHOD_BIND(vm->numClass, "..(_)", primNumRange)
+    PRIM_METHOD_BIND(vm->numClass, "truncate", primNumTruncate)
+    PRIM_METHOD_BIND(vm->numClass, "fraction", primNumFraction)
+    PRIM_METHOD_BIND(vm->numClass, "isInfinity", primNumIsInfinity)
+    PRIM_METHOD_BIND(vm->numClass, "isInteger", primNumIsInteger)
+    PRIM_METHOD_BIND(vm->numClass, "isNan", primNumIsNan)
+    PRIM_METHOD_BIND(vm->numClass, "toString", primNumToString)
+    PRIM_METHOD_BIND(vm->numClass, "==(_)", primNumEqual)
+    PRIM_METHOD_BIND(vm->numClass, "!=(_)", primNumNotEqual)
 
     /* String 类定义在 core.script.inc，将其挂载到 vm->stringClass，并绑定原生方法 */
     vm->stringClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "String"));
     // 以下是 String 类方法
-    PRIM_METHOD_BIND(vm->stringClass->objHeader.class, "fromCodePoint(_)", primStringFromCodePoint);
+    PRIM_METHOD_BIND(vm->stringClass->objHeader.class, "fromCodePoint(_)", primStringFromCodePoint)
     // 以下是 String 实例方法
-    PRIM_METHOD_BIND(vm->stringClass, "+(_)", primStringPlus);
-    PRIM_METHOD_BIND(vm->stringClass, "[_]", primStringSubscript);
-    PRIM_METHOD_BIND(vm->stringClass, "byteAt_(_)", primStringByteAt);
-    PRIM_METHOD_BIND(vm->stringClass, "byteCount_", primStringByteCount);
-    PRIM_METHOD_BIND(vm->stringClass, "codePointAt_(_)", primStringCodePointAt);
-    PRIM_METHOD_BIND(vm->stringClass, "contains(_)", primStringContains);
-    PRIM_METHOD_BIND(vm->stringClass, "indexOf(_)", primStringIndexOf);
-    PRIM_METHOD_BIND(vm->stringClass, "startsWith(_)", primStringStartsWith);
-    PRIM_METHOD_BIND(vm->stringClass, "endsWith(_)", primStringEndsWith);
-    PRIM_METHOD_BIND(vm->stringClass, "toString", primStringToString);
-    PRIM_METHOD_BIND(vm->stringClass, "count", primStringByteCount);
+    PRIM_METHOD_BIND(vm->stringClass, "+(_)", primStringPlus)
+    PRIM_METHOD_BIND(vm->stringClass, "[_]", primStringSubscript)
+    PRIM_METHOD_BIND(vm->stringClass, "byteAt_(_)", primStringByteAt)
+    PRIM_METHOD_BIND(vm->stringClass, "byteCount_", primStringByteCount)
+    PRIM_METHOD_BIND(vm->stringClass, "codePointAt_(_)", primStringCodePointAt)
+    PRIM_METHOD_BIND(vm->stringClass, "contains(_)", primStringContains)
+    PRIM_METHOD_BIND(vm->stringClass, "indexOf(_)", primStringIndexOf)
+    PRIM_METHOD_BIND(vm->stringClass, "startsWith(_)", primStringStartsWith)
+    PRIM_METHOD_BIND(vm->stringClass, "endsWith(_)", primStringEndsWith)
+    PRIM_METHOD_BIND(vm->stringClass, "toString", primStringToString)
+    PRIM_METHOD_BIND(vm->stringClass, "count", primStringByteCount)
 
     /* List 类定义在 core.script.inc，将其挂载到 vm->listClass，并绑定原生方法 */
     vm->listClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "List"));
     // 以下是 List 类方法
-    PRIM_METHOD_BIND(vm->listClass->objHeader.class, "new()", primListNew);
+    PRIM_METHOD_BIND(vm->listClass->objHeader.class, "new()", primListNew)
     // 以下是 List 实例方法
-    PRIM_METHOD_BIND(vm->listClass, "[_]", primListSubscript);
-    PRIM_METHOD_BIND(vm->listClass, "[_]=(_)", primListSubscriptSetter);
-    PRIM_METHOD_BIND(vm->listClass, "add(_)", primListAdd);
-    PRIM_METHOD_BIND(vm->listClass, "addCore_(_)", primListAddCore);
-    PRIM_METHOD_BIND(vm->listClass, "insert(_,_)", primListInsert);
-    PRIM_METHOD_BIND(vm->listClass, "removeAt(_)", primListRemoveAt);
-    PRIM_METHOD_BIND(vm->listClass, "clear()", primListClear);
-    PRIM_METHOD_BIND(vm->listClass, "count", primListCount);
+    PRIM_METHOD_BIND(vm->listClass, "[_]", primListSubscript)
+    PRIM_METHOD_BIND(vm->listClass, "[_]=(_)", primListSubscriptSetter)
+    PRIM_METHOD_BIND(vm->listClass, "add(_)", primListAdd)
+    PRIM_METHOD_BIND(vm->listClass, "addCore_(_)", primListAddCore)
+    PRIM_METHOD_BIND(vm->listClass, "insert(_,_)", primListInsert)
+    PRIM_METHOD_BIND(vm->listClass, "removeAt(_)", primListRemoveAt)
+    PRIM_METHOD_BIND(vm->listClass, "clear()", primListClear)
+    PRIM_METHOD_BIND(vm->listClass, "count", primListCount)
 
     /* Map 类定义在 core.script.inc，将其挂载到 vm->mapClass，并绑定原生方法 */
     vm->mapClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Map"));
     // 以下是 Map 类方法
-    PRIM_METHOD_BIND(vm->mapClass->objHeader.class, "new()", primMapNew);
+    PRIM_METHOD_BIND(vm->mapClass->objHeader.class, "new()", primMapNew)
     // 以下是 Map 实例方法
-    PRIM_METHOD_BIND(vm->mapClass, "[_]", primMapSubscript);
-    PRIM_METHOD_BIND(vm->mapClass, "[_]=(_)", primMapSubscriptSetter);
-    PRIM_METHOD_BIND(vm->mapClass, "addCore_(_,_)", primMapAddCore);
-    PRIM_METHOD_BIND(vm->mapClass, "remove(_)", primMapRemove);
-    PRIM_METHOD_BIND(vm->mapClass, "clear()", primMapClear);
-    PRIM_METHOD_BIND(vm->mapClass, "containsKey(_)", primMapContainsKey);
-    PRIM_METHOD_BIND(vm->mapClass, "count", primMapCount);
+    PRIM_METHOD_BIND(vm->mapClass, "[_]", primMapSubscript)
+    PRIM_METHOD_BIND(vm->mapClass, "[_]=(_)", primMapSubscriptSetter)
+    PRIM_METHOD_BIND(vm->mapClass, "addCore_(_,_)", primMapAddCore)
+    PRIM_METHOD_BIND(vm->mapClass, "remove(_)", primMapRemove)
+    PRIM_METHOD_BIND(vm->mapClass, "clear()", primMapClear)
+    PRIM_METHOD_BIND(vm->mapClass, "containsKey(_)", primMapContainsKey)
+    PRIM_METHOD_BIND(vm->mapClass, "count", primMapCount)
 
     /* range 类定义在 core.script.inc，将其挂载到 vm->rangeClass，并绑定原生方法 */
     vm->rangeClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Range"));
     // 以下是 range 实例方法
-    PRIM_METHOD_BIND(vm->rangeClass, "from", primRangeFrom);
-    PRIM_METHOD_BIND(vm->rangeClass, "to", primRangeTo);
-    PRIM_METHOD_BIND(vm->rangeClass, "min", primRangeMin);
-    PRIM_METHOD_BIND(vm->rangeClass, "max", primRangeMax);
+    PRIM_METHOD_BIND(vm->rangeClass, "from", primRangeFrom)
+    PRIM_METHOD_BIND(vm->rangeClass, "to", primRangeTo)
+    PRIM_METHOD_BIND(vm->rangeClass, "min", primRangeMin)
+    PRIM_METHOD_BIND(vm->rangeClass, "max", primRangeMax)
 
     /* System 类定义在 core.script.inc，将其挂载到 vm->systemClass，并绑定原生方法 */
     Class *systemClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "System"));
     // 以下是 System 类方法
-    PRIM_METHOD_BIND(systemClass->objHeader.class, "clock", primSystemClock);
-    PRIM_METHOD_BIND(systemClass->objHeader.class, "gc()", primSystemGC);
-    PRIM_METHOD_BIND(systemClass->objHeader.class, "importModule(_)", primSystemImportModule);
-    PRIM_METHOD_BIND(systemClass->objHeader.class, "getModuleVariable(_,_)", primSystemGetModuleVariable);
-    PRIM_METHOD_BIND(systemClass->objHeader.class, "writeString_(_)", primSystemWriteString);
+    PRIM_METHOD_BIND(systemClass->objHeader.class, "clock", primSystemClock)
+    PRIM_METHOD_BIND(systemClass->objHeader.class, "gc()", primSystemGC)
+    PRIM_METHOD_BIND(systemClass->objHeader.class, "importModule(_)", primSystemImportModule)
+    PRIM_METHOD_BIND(systemClass->objHeader.class, "getModuleVariable(_,_)", primSystemGetModuleVariable)
+    PRIM_METHOD_BIND(systemClass->objHeader.class, "writeString_(_)", primSystemWriteString)
 
     // 在核心自举过程中创建了很多 ObjString 对象，创建过程中需要调用 initObjHeader 初始化对象头，
     // 使其 class 指向 vm->stringClass，但那时的 vm->stringClass 尚未初始化，因此现在更正。
 
     // 例如 buildCore 函数中在 vm->stringClass 赋值之前执行的 loadModule 函数
-    // loadModule 里调用的链路：loadModule -> compileModule -> compileProgram -> compileClassDefination -> newObjString -> initObjHeader
+    // loadModule 里调用的链路：loadModule -> compileModule -> compileProgram -> compileClassDefinition -> newObjString -> initObjHeader
     // 其中 initObjHeader 函数中会将类头中的 class 成员指向 vm->stringClass，但那时的 vm->stringClass 尚未赋值
     ObjHeader *objHeader = vm->allObjects;
     while (objHeader != NULL) {

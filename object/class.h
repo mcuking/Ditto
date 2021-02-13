@@ -24,11 +24,11 @@ typedef enum {
 
 // 将 Bool 结构转成 Value 结构
 #define BOOL_TO_VALUE(boolean) \
-    boolean ? VT_TO_VALUE(VT_TRUE) : VT_TO_VALUE(VT_FALSE)
+    (boolean ? VT_TO_VALUE(VT_TRUE) : VT_TO_VALUE(VT_FALSE))
 
 // 将 Value 结构转成  Bool 结构
 #define VALUE_TO_BOOL(value) \
-    value.type == VT_TRUE ? true : false
+    (value.type == VT_TRUE ? true : false)
 
 // 将 Number 结构转成 Value 结构
 #define NUM_TO_VALUE(num) \
@@ -36,104 +36,101 @@ typedef enum {
 
 // 将 Value结构转成 Number 结构
 #define VALUE_TO_NUM(value) \
-    value.num
+    (value.num)
 
 // 将 Object 结构转成 Value 结构
 #define OBJ_TO_VALUE(objPtr) ({              \
-    Value value;                             \
-    value.type = VT_OBJ;                     \
-    value.objHeader = (ObjHeader *)(objPtr); \
-    value;                                   \
+    Value val;                             \
+    val.type = VT_OBJ;                     \
+    val.objHeader = (ObjHeader *)(objPtr); \
+    val;                                   \
 })
 
 // 将 Value 结构转成 Object 结构
 #define VALUE_TO_OBJ(value) \
-    value.objHeader
+    (value.objHeader)
 
 // 将 Value 结构转成 String 结构
 #define VALUE_TO_OBJSTR(value) \
-    (ObjString *)VALUE_TO_OBJ(value)
+    ((ObjString *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 Function 结构
 #define VALUE_TO_OBJFN(value) \
-    (ObjFn *)VALUE_TO_OBJ(value)
+    ((ObjFn *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 Range 结构
 #define VALUE_TO_OBJRANGE(value) \
-    (ObjRange *)VALUE_TO_OBJ(value)
+    ((ObjRange *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 Instance 结构
 #define VALUE_TO_OBJINSTANCE(value) \
-    (ObjInstance *)VALUE_TO_OBJ(value)
+    ((ObjInstance *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 List 结构
 #define VALUE_TO_OBJLIST(value) \
-    (ObjList *)VALUE_TO_OBJ(value)
+    ((ObjList *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 Map 结构
 #define VALUE_TO_OBJMAP(value) \
-    (ObjMap *)VALUE_TO_OBJ(value)
+    ((ObjMap *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 Closure 结构
 #define VALUE_TO_OBJCLOSURE(value) \
-    (ObjClosure *)VALUE_TO_OBJ(value)
+    ((ObjClosure *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 Thread 结构
 #define VALUE_TO_OBJTHREAD(value) \
-    (ObjThread *)VALUE_TO_OBJ(value)
+    ((ObjThread *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 Module 结构
 #define VALUE_TO_OBJMODULE(value) \
-    (ObjModule *)VALUE_TO_OBJ(value)
+    ((ObjModule *)VALUE_TO_OBJ(value))
 
 // 将 Value 结构转成 Class 结构
 #define VALUE_TO_CLASS(value) \
-    (Class *)VALUE_TO_OBJ(value)
+    ((Class *)VALUE_TO_OBJ(value))
 
 /** 判断值类型 **/
 
 #define VALUE_IS_UNDEFINED(value) \
-    value.type == VT_UNDEFINED
+    (value.type == VT_UNDEFINED)
 
 #define VALUE_IS_NULL(value) \
-    value.type == VT_NULL
+    (value.type == VT_NULL)
 
 #define VALUE_IS_TRUE(value) \
-    value.type == VT_TRUE
+    (value.type == VT_TRUE)
 
 #define VALUE_IS_FALSE(value) \
-    value.type == VT_FALSE
+    (value.type == VT_FALSE)
 
 #define VALUE_IS_NUM(value) \
-    value.type == VT_NUM
-
-#define VALUE_IS_0(value) \
-    VALUE_IS_NUM(value) && value.num == 0
+    (value.type == VT_NUM)
 
 #define VALUE_IS_OBJ(value) \
-    value.type == VT_OBJ
+    (value.type == VT_OBJ)
 
 // 判断是否是某个特定的对象类型
 #define VALUE_IS_CERTAIN_OBJ(value, objType) \
-    VALUE_IS_OBJ(value) && VALUE_TO_OBJ(value)->type == objType
+    (VALUE_IS_OBJ(value) && VALUE_TO_OBJ(value)->type == objType)
 
 #define VALUE_IS_OBJSTR(value) \
-    VALUE_IS_CERTAIN_OBJ(value, OT_STRING)
+    (VALUE_IS_CERTAIN_OBJ(value, OT_STRING))
 
 #define VALUE_IS_OBJINSTANCE(value) \
-    VALUE_IS_CERTAIN_OBJ(value, OT_INSTANCE)
+    (VALUE_IS_CERTAIN_OBJ(value, OT_INSTANCE))
 
 #define VALUE_IS_OBJCLOSURE(value) \
-    VALUE_IS_CERTAIN_OBJ(value, OT_CLOSURE)
+    (VALUE_IS_CERTAIN_OBJ(value, OT_CLOSURE))
 
 #define VALUE_IS_OBJRANGE(value) \
-    VALUE_IS_CERTAIN_OBJ(value, OT_RANGE)
+    (VALUE_IS_CERTAIN_OBJ(value, OT_RANGE))
 
 #define VALUE_IS_OBJRANGE(value) \
-    VALUE_IS_CERTAIN_OBJ(value, OT_RANGE)
+    (VALUE_IS_CERTAIN_OBJ(value, OT_RANGE))
 
 #define VALUE_IS_CLASS(value) \
-    VALUE_IS_CERTAIN_OBJ(value, OT_CLASS)
+    (VALUE_IS_CERTAIN_OBJ(value, OT_CLASS))
 
 // 定义指向原生方法的指针 Primitive
 // 系统中定义的原生方法太多，后面就用这个指针指向不同的方法，统一调用
@@ -153,7 +150,7 @@ typedef struct
         Primitive primFn;
 
         // obj 指向脚本代码编译后的 ObjClosure 或 ObjFn
-        // 当 type 为 MT_SCRPT 时有效
+        // 当 type 为 MT_SCRIPT 时有效
         ObjClosure *obj;
     };
 } Method;
@@ -185,7 +182,7 @@ typedef union {
 } Bits64;
 
 // 容量的扩展倍数（用于 list、map 等对象的容量设置中）
-#define CAPACIRY_GROW_FACTOR 4
+#define CAPACITY_GROW_FACTOR 4
 
 // 最小容量（用于 map 等对象的容量设置中）
 #define MIN_CAPACITY 64

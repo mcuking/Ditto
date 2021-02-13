@@ -10,7 +10,7 @@ typedef struct {
 } ObjString;
 
 // 将字符串值根据 fnv-1a 算法转成对应哈希值
-uint32_t hashString(char *str, uint32_t length);
+uint32_t hashString(const char *str, uint32_t length);
 
 // 根据字符串对象中的值设置对应的哈希值
 void hashObjString(ObjString *objString);
