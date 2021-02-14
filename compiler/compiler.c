@@ -684,7 +684,7 @@ static void emitLoadVariable(CompileUnit *cu, Variable var) {
             break;
         case VAR_SCOPE_MODULE:
             // 生成【将模块变量的值压入栈顶】的指令
-            writeOpCodeByteOperand(cu, OPCODE_LOAD_MODULE_VAR, var.index);
+            writeOpCodeShortOperand(cu, OPCODE_LOAD_MODULE_VAR, var.index);
             break;
         default:
             NOT_REACHED
@@ -704,7 +704,7 @@ static void emitStoreVariable(CompileUnit *cu, Variable var) {
             break;
         case VAR_SCOPE_MODULE:
             // 生成【将栈顶数据存入模块变量】的指令
-            writeOpCodeByteOperand(cu, OPCODE_STORE_MODULE_VAR, var.index);
+            writeOpCodeShortOperand(cu, OPCODE_STORE_MODULE_VAR, var.index);
             break;
         default:
             NOT_REACHED
@@ -788,7 +788,7 @@ static ObjFn *endCompileUnit(CompileUnit *cu) {
     if (cu->enclosingUnit != NULL) {
         // 将当前编译单元的 cu->fn (其中就包括了该编译单元的指令流 cu->fn->instrStream)
         // 添加到直接外层编译单元即父编译单元的常量表中
-        uint32_t index = addConstant(cu, OBJ_TO_VALUE(cu->fn));
+        uint32_t index = addConstant(cu->enclosingUnit, OBJ_TO_VALUE(cu->fn));
 
         // 在直接外层编译单元的 fn->instrStream 指令流中，添加 为当前内层函数创建闭包 的指令，其中 index 就是上面添加到常量表得到的索引值
         // 也就是说，内层函数是以闭包形式在外层函数中存在
@@ -1595,7 +1595,7 @@ static void mapLiteral(CompileUnit *cu, bool canAssign UNUSED) {
         emitCall(cu, "addCore_(_,_)", 13, 2);
     } while (matchToken(cu->curLexer, TOKEN_COMMA));
     // map 字面量定义必须以 } 结尾
-    assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACE, "map literal should end with ')'!");
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACE, "map literal should end with '}'!");
 }
 
 // 编译用于字面量的中括号，即用于字面量的中括号的 nud 方法
@@ -1644,7 +1644,7 @@ static void subscript(CompileUnit *cu, bool canAssign) {
     // 仅支持一个索引值，list[x,...] 是非法的，此处 processArgList 函数只处理一个参数
     processArgList(cu, &sign);
     // 参数后面需要右中括号 ] 结尾
-    assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACKET, "expect '}' after argument list!");
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACKET, "expect ']' after argument list!");
 
     // 如果右中括号 ] 后面有等号且为可赋值环境，说明是 setter 形式的下标，即 subscript setter，方法形式为 [_] = (_)
     if (matchToken(cu->curLexer, TOKEN_ASSIGN) && canAssign) {
@@ -2199,7 +2199,7 @@ static void compileWhileStatement(CompileUnit *cu) {
     // 进入循环添加时的相关设置
     enterLoopSetting(cu, &loop);
 
-    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect '(' before condition!");
+    assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "expect '(' before condition!");
 
     // 生成【计算循环条件表达式，并将计算结果压入到运行时栈顶】的指令
     expression(cu, BP_LOWEST);
@@ -2559,7 +2559,7 @@ static void compileClassDefinition(CompileUnit *cu) {
     }
 
     // 生成【创建类】的指令
-    // 经过上面的代码，此时栈顶保存的是基类名（父类名），次栈顶保存的是类名，OPCODE_CREATE_CLASS 会将基类名所在的栈顶 slot 回收，并创建类然后存储到原来次栈顶所在的slot
+    // 经过上面的代码，此时栈顶保存的是基类名（父类名），次栈顶保存的是类名，OPCODE_CREATE_CLASS 会将基类名所在的栈顶 slot 回收，并创建类然后存储到原来次栈顶所在的 slot
     // OPCODE_CREATE_CLASS 对应的操作数含义是属性个数，即 fieldNum，然而目前类未定义完，因此属性的个数未知，因此先临时写为 255，待类编译完成后再回填属性个数
     int fieldNumIndex = writeOpCodeByteOperand(cu, OPCODE_CREATE_CLASS, 255);
 
@@ -2731,10 +2731,10 @@ static void compileImport(CompileUnit *cu) {
         emitLoadModuleVar(cu, "System");
 
         // 2. 为调用 System.getModuleVariable('foo', 'bar1')，生成【压入参数 foo 到运行时栈顶】的指令
-        writeOpCodeByteOperand(cu, OPCODE_LOAD_CONSTANT, constModIdx);
+        writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, constModIdx);
 
         // 3. 为调用 System.getModuleVariable('foo', 'bar1')，生成【压入参数 bar1 到运行时栈顶】的指令
-        writeOpCodeByteOperand(cu, OPCODE_LOAD_CONSTANT, constVarIdx);
+        writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, constVarIdx);
 
         // 4. 生成【调用 System.getModuleVariable('foo', 'bar1')，此时次次栈顶是调用方对象 System，次栈顶是参数--模块名 foo，栈顶是参数--变量名 bar】的指令
         emitCall(cu, "getModuleVariable(_,_)", 22, 2);
