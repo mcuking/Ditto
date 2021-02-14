@@ -340,7 +340,6 @@ static void bindMethodAndPath(VM *vm, OpCode opCode, Class *class, uint32_t meth
 
 // 执行指令
 VMResult executeInstruction(VM *vm, register ObjThread *curThread) {
-
     vm->curThread = curThread;  // 当前正在执行的线程
     register Frame *curFrame;   // 当前帧栈 frame
     register Value *stackStart; // 当前帧栈 frame 对应的运行时栈的起始地址（栈底）
@@ -351,13 +350,13 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread) {
 // 定义操作运行时栈的宏
 // esp 指针指向的是栈中下一个可写入数据的 slot，即栈顶的后一个 slot
 #define PUSH(value) (*curThread->esp++ = value) // 压入栈顶
-#define POP() (*(--curThread->esp))             // 弹出栈顶，并获得栈顶的数据
-#define DROP() (curThread->esp--)               // 丢弃栈顶，即回收栈顶空间
-#define PEEK() (*(curThread->esp - 1))          // 获得栈顶数据（不改变栈顶指针 esp）
-#define PEEK2() (*(curThread->esp - 2))         // 获得次栈顶数据（不改变栈顶指针 esp）
+#define POP() (*(--curThread->esp)) // 弹出栈顶，并获得栈顶的数据
+#define DROP() (curThread->esp--) // 丢弃栈顶，即回收栈顶空间
+#define PEEK() (*(curThread->esp - 1)) // 获得栈顶数据（不改变栈顶指针 esp）
+#define PEEK2() (*(curThread->esp - 2)) // 获得次栈顶数据（不改变栈顶指针 esp）
 
 // 定义读取指令流的宏
-#define READ_BYTE() (*ip++)                                          // 从指令流中读取 1 个字节
+#define READ_BYTE() (*ip++) // 从指令流中读取 1 个字节
 #define READ_SHORT() (ip += 2, (uint16_t)(((ip[-2] << 8) | ip[-1]))) // 从指令流中读取 2 个字节，采用大端字节序（即数据的高字节在低地址，低字节在高地址）
 
 // 帧栈 frame 就是函数的执行环境，每调用一个函数就要为其准备一个帧栈 frame
@@ -367,13 +366,14 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread) {
 #define STORE_CUR_FRAME() curFrame->ip = ip
 
 // 加载 curThread->frames 中最新的帧栈 frame
-#define LOAD_CUR_FRAME()
-    // frames 是数组，索引从 0 开始，所以 usedFrameNum - 1
-    curFrame = &curThread->frames[curThread->usedFrameNum - 1];
-    stackStart = curFrame->stackStart;
-    ip = curFrame->ip;
+// frames 是数组，索引从 0 开始，所以 usedFrameNum - 1
+#define LOAD_CUR_FRAME()                                        \
+    curFrame = &curThread->frames[curThread->usedFrameNum - 1]; \
+    stackStart = curFrame->stackStart;                          \
+    ip = curFrame->ip;                                          \
     fn = curFrame->closure->fn;
 
+    LOAD_CUR_FRAME()
 // loopStart 标号作用：当执行完一条指令后，会直接 goto 到此标号，以减少 CPU 跳出各分支的消耗，以提升虚拟机速度
 loopStart:
     // 读入指令流中的操作码
