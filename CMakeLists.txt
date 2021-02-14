@@ -22,6 +22,7 @@ set(SOURCES
         ${SOURCES_ROOT}/object/obj_thread.c
         ${SOURCES_ROOT}/include/unicodeUtf8.c
         ${SOURCES_ROOT}/include/utils.c
+        ${SOURCES_ROOT}/gc/gc.c
         )
 
 include_directories(
@@ -31,6 +32,7 @@ include_directories(
         "${SOURCES_ROOT}/object"
         "${SOURCES_ROOT}/vm"
         "${SOURCES_ROOT}/include"
+        "${SOURCES_ROOT}/gc"
 )
 
 add_executable(di ${SOURCES})

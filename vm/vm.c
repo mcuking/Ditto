@@ -1,6 +1,7 @@
 #include "vm.h"
 #include "compiler.h"
 #include "core.h"
+#include "gc.h"
 #include <stdlib.h>
 
 // 初始化虚拟机
@@ -32,6 +33,23 @@ VM *newVM() {
     // 编译核心模块
     buildCore(vm);
     return vm;
+}
+
+// 释放虚拟机
+void freeVM(VM *vm) {
+    ASSERT(vm->allMethodNames.count > 0, "VM have already been freed!");
+
+    // 释放所有的对象（都存放在链表中）
+    ObjHeader *objHeader = vm->allObjects;
+    while (objHeader != NULL) {
+        // 释放之前先备份下一个结点地址
+        ObjHeader *next = objHeader->next;
+        freeObject(vm, objHeader);
+        objHeader = next;
+    }
+
+    StringBufferClear(vm, &vm->allMethodNames);
+    DEALLOCATE(vm, vm);
 }
 
 // 确保栈的容量及数据有效

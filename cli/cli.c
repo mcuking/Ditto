@@ -27,6 +27,9 @@ static void runFile(const char *path) {
 
     // 第二个参数为模块名称（moduleName），即用文件路径作为模块名称
     executeModule(vm, OBJ_TO_VALUE(newObjString(vm, path, strlen(path))), sourceCode);
+
+    // 释放虚拟机
+    freeVM(vm);
 }
 
 int main(int argc, const char **argv) {
