@@ -48,12 +48,12 @@ typedef struct {
     ValueBuffer constants;
     // 函数（包括类中的方法）所属的模块
     ObjModule *module;
-    // 函数参数的个数
-    uint8_t argNum;
-    // 函数所引用的自由变量 upvalue 的数量
-    uint32_t upvalueNum;
     // 函数在运行时栈中所需的最大空间，这是在编译期间计算的
     uint32_t maxStackSlotUsedNum;
+    // 函数所引用的自由变量 upvalue 的数量
+    uint32_t upvalueNum;
+    // 函数参数的个数
+    uint8_t argNum;
 
 #if DEBUG
     // 只有在 debug 模式下才添加

@@ -4,10 +4,10 @@
 
 // 定义模块对象结构
 typedef struct {
-    ObjString *name; // 模块名称
     ObjHeader objHeader;
     SymbolTable moduleVarName;  // 模块中定义的全局变量名
     ValueBuffer moduleVarValue; // 模块中定义的全局变量值
+    ObjString *name; // 模块名称
 } ObjModule;
 
 // 定义实例对象结构

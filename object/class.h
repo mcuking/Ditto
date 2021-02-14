@@ -159,10 +159,7 @@ typedef struct
 DECLARE_BUFFER_TYPE(Method)
 
 // 定义类的结构
-struct class
-{
-    // 类的名称
-    ObjString *name;
+struct class {
     // 类也有自己的类，类的类就是 meta class，meta class 存储了类的原信息
     // 既然类也有所属类，那么就要有对象头
     ObjHeader objHeader;
@@ -172,6 +169,8 @@ struct class
     uint32_t fieldNum;
     // 存储所有的实例方法
     MethodBuffer methods;
+    // 类的名称
+    ObjString *name;
 };
 
 // Bits64 用于存储 64 位数据
