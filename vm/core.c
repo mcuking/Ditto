@@ -1491,7 +1491,6 @@ static bool primListIteratorValue(VM *vm, Value *args) {
     RET_VALUE(objList->elements.datas[index])
 }
 
-
 /**
  * Map 类的原生方法
 **/
@@ -1592,6 +1591,96 @@ static bool primMapContainsKey(VM *vm, Value *args) {
 static bool primMapCount(VM *vm UNUSED, Value *args) {
     ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
     RET_NUM(objMap->count)
+}
+
+// 迭代 map 中的 entry，即 key-value 对
+// 该方法是脚本中调用 objMap.iterate_(args[1]) 所执行的原生方法，该方法为实例方法
+// 返回 entry 的索引供 keyIteratorValue_ 和 valueIteratorValue_ 做迭代器
+static bool primMapIterate(VM *vm, Value *args) {
+    // 获得 map 对象实例
+    ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
+
+    // map 中若空则返回 false 不可迭代
+    if (objMap->count == 0) {
+        RET_FALSE
+    }
+
+    // 若没有传入迭代器，迭代默认是从第 0 个 entry 开始
+    uint32_t index = 0;
+
+    // 若不是第一次迭代，传进了迭代器
+    if (!VALUE_IS_NULL(args[1])) {
+        // iter 必须为整数
+        if (!validateInt(vm, args[1])) {
+            // 本线程出错了，返回 false 是为了切换到下一线
+            return false;
+        }
+
+        // 迭代器不能小于 0
+        if (VALUE_TO_NUM(args[1]) < 0) {
+            RET_FALSE
+        }
+
+        index = (uint32_t)VALUE_TO_NUM(args[1]);
+        // 迭代器不能越界
+        if (index >= objMap->capacity) {
+            RET_FALSE
+        }
+        // 更新迭代器
+        index++;
+    }
+
+    // 返回下一个正在使用 (有效) 的 entry
+    while (index < objMap->capacity) {
+        // entries 是个数组，元素是哈希槽，
+        // 哈希值散布在这些槽中并不连续，因此逐个判断槽位是否在用
+        if (!VALUE_IS_UNDEFINED(objMap->entries[index].key)) {
+            // 返回 entry 索引
+            RET_NUM(index)
+        }
+        index++;
+    }
+
+    // 若没有有效的 entry 就返回 false，迭代结束
+    RET_FALSE
+}
+
+// 迭代 map 中的 key
+// 该方法是脚本中调用 objMap.keyIteratorValue_(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primMapKeyIteratorValue(VM *vm, Value *args) {
+    ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
+
+    uint32_t index = validateIndex(vm, args[1], objMap->capacity);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+
+    Entry *entry = &objMap->entries[index];
+    if (VALUE_IS_UNDEFINED(entry->key)) {
+        SET_ERROR_FALSE(vm, "invalid iterator!")
+    }
+
+    // 返回该 key
+    RET_VALUE(entry->key)
+}
+
+// 迭代 map 中的 value
+// 该方法是脚本中调用 objMap.valueIteratorValue_(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primMapValueIteratorValue(VM *vm, Value *args) {
+    ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
+
+    uint32_t index = validateIndex(vm, args[1], objMap->capacity);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+
+    Entry *entry = &objMap->entries[index];
+    if (VALUE_IS_UNDEFINED(entry->key)) {
+        SET_ERROR_FALSE(vm, "invalid iterator!");
+    }
+
+    // 返回该 value
+    RET_VALUE(entry->value);
 }
 
 /**
@@ -1991,6 +2080,9 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->mapClass, "clear()", primMapClear)
     PRIM_METHOD_BIND(vm->mapClass, "containsKey(_)", primMapContainsKey)
     PRIM_METHOD_BIND(vm->mapClass, "count", primMapCount)
+    PRIM_METHOD_BIND(vm->mapClass, "iterate_(_)", primMapIterate)
+    PRIM_METHOD_BIND(vm->mapClass, "keyIteratorValue_(_)", primMapKeyIteratorValue)
+    PRIM_METHOD_BIND(vm->mapClass, "valueIteratorValue_(_)", primMapValueIteratorValue)
 
     /* range 类定义在 core.script.inc，将其挂载到 vm->rangeClass，并绑定原生方法 */
     vm->rangeClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Range"));
