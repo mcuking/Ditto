@@ -1499,7 +1499,7 @@ static void stringInterpolation(CompileUnit *cu, bool canAssign UNUSED) {
     // 编译最后的字符串，即生成【加载常量（即该字符）到常量表，并将常量压入到运行时栈顶】的指令
     literal(cu, false);
     // 调用 list 实例对象的 addCore 方法，将最后的字符串从运行时栈顶保存到 list 实例中
-    emitCall(cu, "addCore_", 11, 1);
+    emitCall(cu, "addCore_(_)", 11, 1);
 
     // 调用 list 实例的 join 方法，将 list 中保存的字符合成一个字符串
     emitCall(cu, "join()", 6, 0);
@@ -1624,7 +1624,7 @@ static void listLiteral(CompileUnit *cu, bool canAssign UNUSED) {
         expression(cu, BP_LOWEST);
 
         // 将运行时栈顶的值（即表达式的计算结果）写入到 list 对象实例中
-        emitCall(cu, "addCore_()", 11, 1);
+        emitCall(cu, "addCore_(_)", 11, 1);
     } while (matchToken(cu->curLexer, TOKEN_COMMA));
     // list 字面量定义必须以 ] 结尾
     assertCurToken(cu->curLexer, TOKEN_RIGHT_BRACKET, "expect ']' after list element!");
