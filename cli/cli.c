@@ -1,7 +1,7 @@
-#include "class.h"
+#include "cli.h"
 #include "core.h"
-#include "lexer.h"
 #include "vm.h"
+#include <stdio.h>
 #include <string.h>
 
 // 运行脚本文件
@@ -22,6 +22,7 @@ static void runFile(const char *path) {
         rootDir = root;
     }
 
+    // 创建虚拟机
     VM *vm = newVM();
     const char *sourceCode = readFile(path);
 
@@ -32,9 +33,30 @@ static void runFile(const char *path) {
     freeVM(vm);
 }
 
+// 运行命令行
+static void runCli(void) {
+    // 创建虚拟机
+    VM *vm = newVM();
+
+    char sourceLine[MAX_LINE_LEN];
+    while (true) {
+        printf(">>> ");
+
+        // 若读取失败或者键入 quit 就退出循环
+        if (!fgets(sourceLine, MAX_LINE_LEN, stdin) || memcmp(sourceLine, "quit", 4) == 0) {
+            break;
+        }
+        // 执行输入的脚本代码
+        executeModule(vm, OBJ_TO_VALUE(newObjString(vm, "cli", 3)), sourceLine);
+    }
+
+    // 释放虚拟机
+    freeVM(vm);
+}
+
 int main(int argc, const char **argv) {
     if (argc == 1) {
-        // TODO: 调用执行脚本语言的命令行
+        runCli();
     } else {
         // 运行脚本文件
         runFile(argv[1]);

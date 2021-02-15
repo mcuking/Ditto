@@ -1,10 +1,7 @@
 #include "core.h"
-#include "class.h"
 #include "compiler.h"
 #include "core.script.inc"
 #include "unicodeUtf8.h"
-#include "utils.h"
-#include "vm.h"
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
