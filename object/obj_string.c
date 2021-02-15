@@ -42,12 +42,12 @@ ObjString *newObjString(VM *vm, const char *str, uint32_t length) {
 
     /** 2. 设置 value **/
     // 如果字符串非空，则需要赋值其内容
+    objString->value.length = length;
+
     if (length > 0) {
         // 将 str 所指的字符串的 length 个字符复制到 objString->value.start 所指的字符串
         memcpy(objString->value.start, str, length);
     }
-
-    objString->value.length = length;
 
     // 结尾添加字符串结束符 \0
     objString->value.start[length] = '\0';

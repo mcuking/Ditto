@@ -116,6 +116,6 @@ Class *getClassOfObj(VM *vm, Value object) {
         case VT_OBJ:
             return VALUE_TO_OBJ(object)->class;
         default:
-            NOT_REACHED
+            NOT_REACHED()
     }
 }
