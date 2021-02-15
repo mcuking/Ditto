@@ -1676,11 +1676,11 @@ static bool primMapValueIteratorValue(VM *vm, Value *args) {
 
     Entry *entry = &objMap->entries[index];
     if (VALUE_IS_UNDEFINED(entry->key)) {
-        SET_ERROR_FALSE(vm, "invalid iterator!");
+        SET_ERROR_FALSE(vm, "invalid iterator!")
     }
 
     // 返回该 value
-    RET_VALUE(entry->value);
+    RET_VALUE(entry->value)
 }
 
 /**
@@ -1713,6 +1713,62 @@ static bool primRangeMin(VM *vm UNUSED, Value *args) {
 static bool primRangeMax(VM *vm UNUSED, Value *args) {
     ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
     RET_NUM(fmax(objRange->from, objRange->to))
+}
+
+// 迭代 range 中的值
+// 该方法是脚本中调用 objRange.iterate(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primRangeIterate(VM *vm, Value *args) {
+    ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
+
+    // 若未提供 iter 说明是第一次迭代，因此返回 range->from
+    if (VALUE_IS_NULL(args[1])) {
+        RET_NUM(objRange->from)
+    }
+
+    // 迭代器必须是数字
+    if (!validateNum(vm, args[1])) {
+        return false;
+    }
+
+    // 获得迭代器
+    double iter = VALUE_TO_NUM(args[1]);
+
+    // 若是正方向
+    if (objRange->from < objRange->to) {
+        iter++;
+        if (iter > objRange->to) {
+            RET_FALSE
+        }
+    } else {
+        // 若是反向迭代
+        iter--;
+        if (iter < objRange->to) {
+            RET_FALSE
+        }
+    }
+
+    RET_NUM(iter)
+}
+
+// range 的迭代就是 range 中从 from 到 to 之间的值，因此直接返回迭代器就是range的值
+// 该方法是脚本中调用 objRange.iteratorValue(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primRangeIteratorValue(VM *vm UNUSED, Value *args) {
+    ObjRange *objRange = VALUE_TO_OBJRANGE(args[0]);
+    double value = VALUE_TO_NUM(args[1]);
+
+    // 确保 args[1] 在 from 和 to 的范围中
+    // 若是正方向
+    if (objRange->from < objRange->to) {
+        if (value >= objRange->from && value <= objRange->to) {
+            RET_VALUE(args[1])
+        }
+    } else {
+        // 若是反向
+        if (value <= objRange->from && value >= objRange->to) {
+            RET_VALUE(args[1])
+        }
+    }
+    RET_FALSE
 }
 
 /**
@@ -2091,6 +2147,8 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->rangeClass, "to", primRangeTo)
     PRIM_METHOD_BIND(vm->rangeClass, "min", primRangeMin)
     PRIM_METHOD_BIND(vm->rangeClass, "max", primRangeMax)
+    PRIM_METHOD_BIND(vm->rangeClass, "iterate(_)", primRangeIterate)
+    PRIM_METHOD_BIND(vm->rangeClass, "iteratorValue(_)", primRangeIteratorValue)
 
     /* System 类定义在 core.script.inc，将其挂载到 vm->systemClass，并绑定原生方法 */
     Class *systemClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "System"));
