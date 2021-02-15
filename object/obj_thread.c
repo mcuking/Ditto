@@ -40,6 +40,17 @@ ObjThread *newObjThread(VM *vm, ObjClosure *objClosure) {
     // 闭包 objClosure 为空则报错
     ASSERT(objClosure != NULL, "objClosure is NULL");
 
+    // 为函数帧栈（frame）数组申请内存，默认为 4 个 frame，即 INITIAL_FRAME_NUM 为 4
+    Frame *frames = ALLOCATE_ARRAY(vm, Frame, INITIAL_FRAME_NUM);
+
+    // 计算线程的运行时栈的容量
+    // TODO: 线程的运行时栈容量 stackCapacity 为什么是大于等于函数的 maxStackSlotUsedNum + 1 的最小 2 次幂？
+    // 补充：ceilToPowerOf2 方法作用--找出大于等于 v 的最小的 2 次幂
+    uint32_t stackCapacity = ceilToPowerOf2(objClosure->fn->maxStackSlotUsedNum + 1);
+
+    // 为线程的运行时栈申请内存
+    Value *newStack = ALLOCATE_ARRAY(vm, Value, stackCapacity);
+
     // 申请内存
     ObjThread *objThread = ALLOCATE(vm, ObjThread);
 
@@ -51,23 +62,12 @@ ObjThread *newObjThread(VM *vm, ObjClosure *objClosure) {
     // 初始化对象头
     initObjHeader(vm, &objThread->objHeader, OT_THREAD, vm->threadClass);
 
-    // 为函数帧栈（frame）数组申请内存，默认为 4 个 frame，即 INITIAL_FRAME_NUM 为 4
-    Frame *frames = ALLOCATE_ARRAY(vm, Frame, INITIAL_FRAME_NUM);
     objThread->frames = frames;
     objThread->frameCapacity = INITIAL_FRAME_NUM;
-
-    // 计算线程的运行时栈的容量
-    // TODO: 线程的运行时栈容量 stackCapacity 为什么是大于等于函数的 maxStackSlotUsedNum + 1 的最小 2 次幂？
-    // 补充：ceilToPowerOf2 方法作用--找出大于等于 v 的最小的 2 次幂
-    uint32_t stackCapacity = ceilToPowerOf2(objClosure->fn->maxStackSlotUsedNum + 1);
     objThread->stackCapacity = stackCapacity;
-
-    // 为线程的运行时栈申请内存
-    Value *newStack = ALLOCATE_ARRAY(vm, Value, stackCapacity);
     objThread->stack = newStack;
 
     // 重置线程对象，即为闭包 objClosure 中的函数初始化运行时栈
     resetThread(objThread, objClosure);
-
     return objThread;
 }

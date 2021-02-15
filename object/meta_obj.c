@@ -13,26 +13,26 @@ ObjModule *newObjModule(VM *vm, const char *modName) {
         MEM_ERROR("allocate ObjModule failed!");
     }
 
-    /** 1. 设置 name **/
-    objModule->name = NULL;
-    if (modName != NULL) {
-        objModule->name = newObjString(vm, modName, strlen(modName));
-    }
-
-    /** 2. 初始化对象头 **/
+    /** 1. 初始化对象头 **/
     // 注意：&objModule->objHeader 中 -> 优先级高于 &
     // 所以是取的 objHeader，然后再获取它的地址
     // 另外 ObjModule 时元信息对象，不属于任何一个类，
     // 所以最后一个参数传 NULL
     initObjHeader(vm, &objModule->objHeader, OT_MODULE, NULL);
 
-    /** 3. 设置 moduleName **/
+    /** 2. 设置 moduleName **/
     // TODO: 待后续解释
     StringBufferInit(&objModule->moduleVarName);
 
-    /** 4. 设置 moduleValue **/
+    /** 3. 设置 moduleValue **/
     // TODO: 待后续解释
     ValueBufferInit(&objModule->moduleVarValue);
+
+    /** 4. 设置 name **/
+    objModule->name = NULL;
+    if (modName != NULL) {
+        objModule->name = newObjString(vm, modName, strlen(modName));
+    }
 
     return objModule;
 }
@@ -61,7 +61,7 @@ ObjInstance *newObjInstance(VM *vm, Class *class) {
     // 来循环遍历进行初始化实例对象的属性值
     uint32_t idx = 0;
     while (idx < class->fieldNum) {
-        objInstance->fields[idx] = VT_TO_VALUE(VT_NULL);
+        objInstance->fields[idx++] = VT_TO_VALUE(VT_NULL);
     }
 
     return objInstance;

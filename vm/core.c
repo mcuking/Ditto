@@ -19,6 +19,23 @@ char *rootDir = NULL;
 // 宏 CORE_MODULE 用来表示核心模块，值是 VT_NUL 的 Value 结构
 #define CORE_MODULE VT_TO_VALUE(VT_NULL)
 
+// 定义原生方法的返回值
+// 将 value 存储在 arg[0] 中
+// 返回 true 或 false，会使虚拟机在回收该参数时采用不同的回收策略
+#define RET_VALUE(value) \
+    do {                 \
+        args[0] = value; \
+        return true;     \
+    } while (0);
+
+//将值转为 Value 格式后做为返回值
+#define RET_OBJ(objPtr) RET_VALUE(OBJ_TO_VALUE(objPtr))
+#define RET_BOOL(boolean) RET_VALUE(BOOL_TO_VALUE(boolean))
+#define RET_NUM(num) RET_VALUE(NUM_TO_VALUE(num))
+#define RET_NULL RET_VALUE(VT_TO_VALUE(VT_NULL))
+#define RET_TRUE RET_VALUE(VT_TO_VALUE(VT_TRUE))
+#define RET_FALSE RET_VALUE(VT_TO_VALUE(VT_FALSE))
+
 // 设置线程报错
 // 返回 false 通知虚拟机当前线程已报错，该切换线程了
 #define SET_ERROR_FALSE(vmPtr, errMsg)                                 \
@@ -28,13 +45,34 @@ char *rootDir = NULL;
         return false;                                                  \
     } while (0);
 
+// 绑定原生方法 func 到 classPtr 指向的类
+// 其中 methodName 为脚本中使用的方法名，func 为原生方法
+// 绑定后，脚本中类 classPtr 的方法 methodName 对应的原生方法是 func，即脚本中调用 methodName 方法就是调用原生方法 func
+// 步骤：
+// 首先从 vm->allMethodNames 中查找 methodName，如果找到则获取对应索引，否则向 vm->allMethodNames 加入 methodName 并获取对应索引
+// 然后基于 func 新建一个 method
+// 最后将 method 绑定到 classPtr 指向的类，并且保证索引和 methodName 在 vm->allMethodNames 索引相同（bindMethod 函数实现逻辑）
+// 即 vm->allMethodNames 中的方法名和 Class->methods 中的方法体一一映射
+#define PRIM_METHOD_BIND(classPtr, methodName, func)                                      \
+    {                                                                                     \
+        uint32_t length = strlen(methodName);                                             \
+        int globalIdx = getIndexFromSymbolTable(&vm->allMethodNames, methodName, length); \
+        if (globalIdx == -1) {                                                            \
+            globalIdx = addSymbol(vm, &vm->allMethodNames, methodName, length);           \
+        }                                                                                 \
+        Method method;                                                                    \
+        method.type = MT_PRIMITIVE;                                                       \
+        method.primFn = func;                                                             \
+        bindMethod(vm, classPtr, (uint32_t)globalIdx, method);                            \
+    }
+
 // 读取源码文件的方法
 // path 为源码路径
 char *readFile(const char *path) {
     //获取源码文件的句柄 file
     FILE *file = fopen(path, "r");
     if (file == NULL) {
-        IO_ERROR("Couldn't open file \"%s\"", path);
+        IO_ERROR("Couldn't open file \"%s\".\n", path);
     }
 
     struct stat fileStat;
@@ -49,7 +87,7 @@ char *readFile(const char *path) {
 
     size_t numRead = fread(fileContent, sizeof(char), fileSize, file);
     if (numRead < fileSize) {
-        IO_ERROR("Couldn't read file \"%s\"", path);
+        IO_ERROR("Couldn't read file \"%s\".\n", path);
     }
     // 字符串要以 \0 结尾
     fileContent[fileSize] = '\0';
@@ -79,14 +117,6 @@ static ObjString *num2str(VM *vm, double num) {
     return newObjString(vm, buf, len);
 }
 
-// 判断 arg 是否为字符串
-static bool validateString(VM *vm, Value arg) {
-    if (VALUE_IS_OBJSTR(arg)) {
-        return true;
-    }
-    SET_ERROR_FALSE(vm, "argument must be string!")
-}
-
 // 判断 arg 是否为函数
 static bool validateFn(VM *vm, Value arg) {
     if (VALUE_TO_OBJCLOSURE(arg)) {
@@ -94,6 +124,14 @@ static bool validateFn(VM *vm, Value arg) {
     }
     vm->curThread->errorObj = OBJ_TO_VALUE(newObjString(vm, "argument must be a function!", 28));
     return false;
+}
+
+// 判断 arg 是否为字符串
+static bool validateString(VM *vm, Value arg) {
+    if (VALUE_IS_OBJSTR(arg)) {
+        return true;
+    }
+    SET_ERROR_FALSE(vm, "argument must be string!")
 }
 
 //判断 arg 是否为数字
@@ -330,52 +368,15 @@ static int findString(ObjString *haystack, ObjString *needle) {
     return -1;
 }
 
-// 根据模块名获取文件绝对路径
-// 拼接规则：rootDir + moduleName + '.di'
-static char *getFilePath(const char *moduleName) {
-    uint32_t rootDirLength = rootDir == NULL ? 0 : strlen(rootDir);
-    uint32_t nameLength = strlen(moduleName);
-    uint32_t pathLength = rootDirLength + nameLength + strlen(".di");
-    char *path = (char *)malloc(pathLength + 1);
-
-    if (rootDir != NULL) {
-        memmove(path, rootDir, rootDirLength);
+// 从核心模块中获取名为 name 的类
+static Value getCoreClassValue(ObjModule *objModule, const char *name) {
+    int index = getIndexFromSymbolTable(&objModule->moduleVarName, name, strlen(name));
+    if (index == -1) {
+        char id[MAX_ID_LEN] = {'\0'};
+        memcpy(id, name, strlen(name));
+        RUN_ERROR("something wrong occur: missing core class \"%s\"!", id);
     }
-
-    memmove(path + rootDirLength, moduleName, nameLength);
-    memmove(path + rootDirLength + nameLength, ".di", 3);
-    path[pathLength] = '\0';
-    return path;
-}
-
-// 读取名为 moduleName 的模块
-static char *readModule(const char *moduleName) {
-    char *modulePath = getFilePath(moduleName);
-    char *moduleCode = readFile(modulePath);
-    free(modulePath);
-    return moduleCode;
-}
-
-// 输出字符串
-static void printString(const char *str) {
-    printf("%s", str);
-    // 输出到缓冲区后立即刷新
-    fflush(stdout);
-}
-
-// 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
-int getIndexFromSymbolTable(SymbolTable *table, const char *symbol, uint32_t length) {
-    ASSERT(length != 0, "length of symbol is 0!");
-    uint32_t index = 0;
-    // 遍历 table->data，找到与 symbol 相等的，然后返回该索引值
-    while (index < table->count) {
-        if (length == table->datas[index].length && memcmp(table->datas[index].str, symbol, length) == 0) {
-            return index;
-        }
-        index++;
-    }
-    // 找不到则返回 -1
-    return -1;
+    return objModule->moduleVarValue.datas[index];
 }
 
 // 从 vm->allModules 中获取名为 moduleName 的模块
@@ -385,7 +386,7 @@ static ObjModule *getModule(VM *vm, Value moduleName) {
     if (value.type == VT_UNDEFINED) {
         return NULL;
     }
-    return VALUE_TO_OBJMODULE(value);
+    return (ObjModule *)(value.objHeader);
 }
 
 // 加载名为 moduleName 的模块并进行编译
@@ -422,6 +423,39 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode) {
     ObjClosure *objClosure = newObjClosure(vm, fn);
     ObjThread *moduleThread = newObjThread(vm, objClosure);
     return moduleThread;
+}
+
+// 根据模块名获取文件绝对路径
+// 拼接规则：rootDir + moduleName + '.di'
+static char *getFilePath(const char *moduleName) {
+    uint32_t rootDirLength = rootDir == NULL ? 0 : strlen(rootDir);
+    uint32_t nameLength = strlen(moduleName);
+    uint32_t pathLength = rootDirLength + nameLength + strlen(".di");
+    char *path = (char *)malloc(pathLength + 1);
+
+    if (rootDir != NULL) {
+        memmove(path, rootDir, rootDirLength);
+    }
+
+    memmove(path + rootDirLength, moduleName, nameLength);
+    memmove(path + rootDirLength + nameLength, ".di", 3);
+    path[pathLength] = '\0';
+    return path;
+}
+
+// 读取名为 moduleName 的模块
+static char *readModule(const char *moduleName) {
+    char *modulePath = getFilePath(moduleName);
+    char *moduleCode = readFile(modulePath);
+    free(modulePath);
+    return moduleCode;
+}
+
+// 输出字符串
+static void printString(const char *str) {
+    printf("%s", str);
+    // 输出到缓冲区后立即刷新
+    fflush(stdout);
 }
 
 // 导入模块 moduleName，主要是把编译模块并加载到 vm->allModules
@@ -476,135 +510,6 @@ static Value getModuleVariable(VM *vm, Value moduleName, Value variableName) {
     // 否则模块变量存在，直接返回对应的模块变量 variableName 的值
     return objModule->moduleVarValue.datas[index];
 }
-
-// 从核心模块中获取名为 name 的类
-static Value getCoreClassValue(ObjModule *objModule, const char *name) {
-    int index = getIndexFromSymbolTable(&objModule->moduleVarName, name, strlen(name));
-    if (index == -1) {
-        char id[MAX_ID_LEN] = {'\0'};
-        memcpy(id, name, strlen(name));
-        RUN_ERROR("something wrong occur: missing core class \"%s\"!", id);
-    }
-    return objModule->moduleVarValue.datas[index];
-}
-
-// 执行名为 moduleName 代码为 moduleCode 的模块
-VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode) {
-    ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
-    return executeInstruction(vm, objThread);
-}
-
-// 向 table 中添加符号 symbol，并返回 symbol 对应在 table 的索引
-int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length) {
-    ASSERT(length != 0, "length of symbol is 0!");
-
-    String string;
-    string.str = ALLOCATE_ARRAY(vm, char, length + 1); // 申请内存，加 1 是为了添加结尾符 \0
-    memcpy(string.str, symbol, length);                // 将 symbol 内容拷贝到 string.str 上
-    string.str[length] = '\0';
-    string.length = length;
-    StringBufferAdd(vm, table, string); // 向 table 中塞入 string
-    return table->count - 1;
-}
-
-// 确保符号 symbol 已经添加到符号表 table 中，如果查找没有，则向其中添加
-int ensureSymbolExist(VM *vm, SymbolTable *table, const char *symbol, uint32_t length) {
-    // 先从 table 中查找 symbol
-    int symbolIndex = getIndexFromSymbolTable(table, symbol, length);
-
-    // 如果没找到·，则添加 symbol 到 table 中，然后返回其索引
-    if (symbolIndex == -1) {
-        return addSymbol(vm, table, symbol, length);
-    }
-    // 如果找到，则返回其索引
-    return symbolIndex;
-}
-
-// 在 objModule 模块中定义名为 name 的类
-static Class *defineClass(VM *vm, ObjModule *objModule, const char *name) {
-    // 创建类
-    Class *class = newRawClass(vm, name, 0);
-    // 将类作为普通变量在模块中定义
-    defineModuleVar(vm, objModule, name, strlen(name), OBJ_TO_VALUE(class));
-    return class;
-}
-
-// 绑定方法到指定类
-// 将方法 method 到类 class 的 methods 数组中，位置为 index
-void bindMethod(VM *vm, Class *class, uint32_t index, Method method) {
-    // 各类自己的 methods 数组和 vm->allMethodNames 长度保持一致，进而 vm->allMethodNames 中的方法名和各个类的 methods 数组对应方法体的索引值相等，
-    // 这样就可以通过相同的索引获取到方法体或者方法名
-    // 然而 vm->allMethodNames 只有一个，但会对应多个类，所以各个类的 methods 数组中的方法体数量必然会小于 vm->allMethodNames 中的方法名数量
-    // 为了保证一样长度，就需要将各个类的 methods 数组中无用的索引处用空占位填充
-    if (index >= class->methods.count) {
-        Method emptyPad = {MT_NONE, {0}};
-        MethodBufferFillWrite(vm, &class->methods, emptyPad, index - class->methods.count + 1);
-    }
-
-    class->methods.datas[index] = method;
-}
-
-// 绑定 superClass 为 subClass 的基类
-// 即继承基类的属性个数和方法（通过复制实现）
-void bindSuperClass(VM *vm, Class *subClass, Class *superClass) {
-    subClass->superClass = subClass;
-
-    // 继承基类的属性个数
-    subClass->fieldNum = superClass->fieldNum;
-
-    // 继承基类的方法
-    uint32_t idx = 0;
-    while (idx < superClass->methods.count) {
-        bindMethod(vm, subClass, idx, superClass->methods.datas[idx]);
-        idx++;
-    }
-}
-
-//绑定 fn.call 的重载，同样一个函数的 call 方法支持 0～16 个参数
-static void bindFnOverloadCall(VM *vm, const char *sign) {
-    uint32_t index = ensureSymbolExist(vm, &vm->allMethodNames, sign, strlen(sign));
-    //构造 method
-    Method method = {MT_FN_CALL, {0}};
-    bindMethod(vm, vm->fnClass, index, method);
-}
-
-// 定义原生方法的返回值
-// 将 value 存储在 arg[0] 中
-// 返回 true 或 false，会使虚拟机在回收该参数时采用不同的回收策略
-#define RET_VALUE(value) \
-    do {                 \
-        args[0] = value; \
-        return true;     \
-    } while (0);
-
-//将值转为 Value 格式后做为返回值
-#define RET_OBJ(objPtr) RET_VALUE(OBJ_TO_VALUE(objPtr))
-#define RET_BOOL(boolean) RET_VALUE(BOOL_TO_VALUE(boolean))
-#define RET_NUM(num) RET_VALUE(NUM_TO_VALUE(num))
-#define RET_NULL RET_VALUE(VT_TO_VALUE(VT_NULL))
-#define RET_TRUE RET_VALUE(VT_TO_VALUE(VT_TRUE))
-#define RET_FALSE RET_VALUE(VT_TO_VALUE(VT_FALSE))
-
-// 绑定原生方法 func 到 classPtr 指向的类
-// 其中 methodName 为脚本中使用的方法名，func 为原生方法
-// 绑定后，脚本中类 classPtr 的方法 methodName 对应的原生方法是 func，即脚本中调用 methodName 方法就是调用原生方法 func
-// 步骤：
-// 首先从 vm->allMethodNames 中查找 methodName，如果找到则获取对应索引，否则向 vm->allMethodNames 加入 methodName 并获取对应索引
-// 然后基于 func 新建一个 method
-// 最后将 method 绑定到 classPtr 指向的类，并且保证索引和 methodName 在 vm->allMethodNames 索引相同（bindMethod 函数实现逻辑）
-// 即 vm->allMethodNames 中的方法名和 Class->methods 中的方法体一一映射
-#define PRIM_METHOD_BIND(classPtr, methodName, func)                                      \
-    {                                                                                     \
-        uint32_t length = strlen(methodName);                                             \
-        int globalIdx = getIndexFromSymbolTable(&vm->allMethodNames, methodName, length); \
-        if (globalIdx == -1) {                                                            \
-            globalIdx = addSymbol(vm, &vm->allMethodNames, methodName, length);           \
-        }                                                                                 \
-        Method method;                                                                    \
-        method.type = MT_PRIMITIVE;                                                       \
-        method.primFn = func;                                                             \
-        bindMethod(vm, classPtr, (uint32_t)globalIdx, method);                            \
-    }
 
 /**
  * Object 类的原生方法
@@ -1680,6 +1585,101 @@ static bool primSystemWriteString(VM *vm UNUSED, Value *args) {
  * 至此，原生方法定义部分结束
 **/
 
+// 执行名为 moduleName 代码为 moduleCode 的模块
+VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode) {
+    ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
+    return executeInstruction(vm, objThread);
+}
+
+// 在 table 中查找符号 symbol，找到后返回索引，否则返回 -1
+int getIndexFromSymbolTable(SymbolTable *table, const char *symbol, uint32_t length) {
+    ASSERT(length != 0, "length of symbol is 0!");
+    uint32_t index = 0;
+    // 遍历 table->data，找到与 symbol 相等的，然后返回该索引值
+    while (index < table->count) {
+        if (length == table->datas[index].length && memcmp(table->datas[index].str, symbol, length) == 0) {
+            return index;
+        }
+        index++;
+    }
+    // 找不到则返回 -1
+    return -1;
+}
+
+// 向 table 中添加符号 symbol，并返回 symbol 对应在 table 的索引
+int addSymbol(VM *vm, SymbolTable *table, const char *symbol, uint32_t length) {
+    ASSERT(length != 0, "length of symbol is 0!");
+
+    String string;
+    string.str = ALLOCATE_ARRAY(vm, char, length + 1); // 申请内存，加 1 是为了添加结尾符 \0
+    memcpy(string.str, symbol, length);                // 将 symbol 内容拷贝到 string.str 上
+    string.str[length] = '\0';
+    string.length = length;
+    StringBufferAdd(vm, table, string); // 向 table 中塞入 string
+    return table->count - 1;
+}
+
+// 确保符号 symbol 已经添加到符号表 table 中，如果查找没有，则向其中添加
+int ensureSymbolExist(VM *vm, SymbolTable *table, const char *symbol, uint32_t length) {
+    // 先从 table 中查找 symbol
+    int symbolIndex = getIndexFromSymbolTable(table, symbol, length);
+
+    // 如果没找到·，则添加 symbol 到 table 中，然后返回其索引
+    if (symbolIndex == -1) {
+        return addSymbol(vm, table, symbol, length);
+    }
+    // 如果找到，则返回其索引
+    return symbolIndex;
+}
+
+// 在 objModule 模块中定义名为 name 的类
+static Class *defineClass(VM *vm, ObjModule *objModule, const char *name) {
+    // 创建类
+    Class *class = newRawClass(vm, name, 0);
+    // 将类作为普通变量在模块中定义
+    defineModuleVar(vm, objModule, name, strlen(name), OBJ_TO_VALUE(class));
+    return class;
+}
+
+// 绑定方法到指定类
+// 将方法 method 到类 class 的 methods 数组中，位置为 index
+void bindMethod(VM *vm, Class *class, uint32_t index, Method method) {
+    // 各类自己的 methods 数组和 vm->allMethodNames 长度保持一致，进而 vm->allMethodNames 中的方法名和各个类的 methods 数组对应方法体的索引值相等，
+    // 这样就可以通过相同的索引获取到方法体或者方法名
+    // 然而 vm->allMethodNames 只有一个，但会对应多个类，所以各个类的 methods 数组中的方法体数量必然会小于 vm->allMethodNames 中的方法名数量
+    // 为了保证一样长度，就需要将各个类的 methods 数组中无用的索引处用空占位填充
+    if (index >= class->methods.count) {
+        Method emptyPad = {MT_NONE, {0}};
+        MethodBufferFillWrite(vm, &class->methods, emptyPad, index - class->methods.count + 1);
+    }
+
+    class->methods.datas[index] = method;
+}
+
+// 绑定 superClass 为 subClass 的基类
+// 即继承基类的属性个数和方法（通过复制实现）
+void bindSuperClass(VM *vm, Class *subClass, Class *superClass) {
+    subClass->superClass = superClass;
+
+    // 继承基类的属性个数
+    subClass->fieldNum += superClass->fieldNum;
+
+    // 继承基类的方法
+    uint32_t idx = 0;
+    while (idx < superClass->methods.count) {
+        bindMethod(vm, subClass, idx, superClass->methods.datas[idx]);
+        idx++;
+    }
+}
+
+//绑定 fn.call 的重载，同样一个函数的 call 方法支持 0～16 个参数
+static void bindFnOverloadCall(VM *vm, const char *sign) {
+    uint32_t index = ensureSymbolExist(vm, &vm->allMethodNames, sign, strlen(sign));
+    //构造 method
+    Method method = {MT_FN_CALL, {0}};
+    bindMethod(vm, vm->fnClass, index, method);
+}
+
 // 编译核心模块
 void buildCore(VM *vm) {
     // 创建核心模块
@@ -1732,7 +1732,7 @@ void buildCore(VM *vm) {
     executeModule(vm, CORE_MODULE, coreModuleCode);
 
     /* Bool 类定义在 core.script.inc，将其挂载到 vm->boolClass，并绑定原生方法 */
-    vm->boolClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "bool"));
+    vm->boolClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Bool"));
     PRIM_METHOD_BIND(vm->boolClass, "toString", primBoolToString)
     PRIM_METHOD_BIND(vm->boolClass, "!", primBoolNot)
 

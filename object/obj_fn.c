@@ -66,7 +66,7 @@ ObjFn *newObjFn(VM *vm, ObjModule *objModule, uint32_t slotNum) {
 ObjClosure *newObjClosure(VM *vm, ObjFn *objFn) {
     // 申请内存
     ObjClosure *objClosure =
-        ALLOCATE_EXTRA(vm, ObjClosure, sizeof(objClosure->upvalues) * objFn->upvalueNum);
+        ALLOCATE_EXTRA(vm, ObjClosure, sizeof(ObjUpvalue *) * objFn->upvalueNum);
 
     // 申请内存失败
     if (objClosure == NULL) {
@@ -74,7 +74,7 @@ ObjClosure *newObjClosure(VM *vm, ObjFn *objFn) {
     }
 
     // 初始化对象头
-    initObjHeader(vm, &objClosure->objHeader, OT_CLOSURE, NULL);
+    initObjHeader(vm, &objClosure->objHeader, OT_CLOSURE, vm->fnClass);
 
     objClosure->fn = objFn;
 

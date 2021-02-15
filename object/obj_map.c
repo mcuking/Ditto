@@ -230,9 +230,8 @@ Value removeKey(VM *vm, ObjMap *objMap, Value key) {
     // 如果删除后 objMap 为空，则回收内存空间
     if (objMap->count == 0) {
         clearMap(vm, objMap);
-    }
-    // 如果删除后实际使用槽位 slot 数量小于容量的 1 / 4 的 80%，且实际使用量仍大于规定的最小容量，则缩小容量
-    else if ((objMap->count < objMap->capacity / CAPACITY_GROW_FACTOR * MAP_LOAD_PERCENT) && objMap->count > MIN_CAPACITY) {
+    } else if ((objMap->count < objMap->capacity / CAPACITY_GROW_FACTOR * MAP_LOAD_PERCENT) && objMap->count > MIN_CAPACITY) {
+        // 如果删除后实际使用槽位 slot 数量小于容量的 1 / 4 的 80%，且实际使用量仍大于规定的最小容量，则缩小容量
         uint32_t newCapacity = objMap->capacity / CAPACITY_GROW_FACTOR;
 
         // 如果缩小的新容量小于最小容量，则设置为最小容量

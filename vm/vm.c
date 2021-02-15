@@ -89,15 +89,15 @@ void ensureStack(VM *vm, ObjThread *objThread, uint32_t needSlots) {
             idx++;
         }
 
-        // 2.调整 “大栈” 的栈顶 esp
-        objThread->esp += offset;
-
-        // 3.调整自由变量 upvalue 中 localVarPtr (用于指向对应的自由变量 upvalue)
+        // 2.调整自由变量 upvalue 中 localVarPtr (用于指向对应的自由变量 upvalue)
         ObjUpvalue *upvalue = objThread->openUpvalues;
         while (upvalue != NULL) {
             upvalue->localVarPtr += offset;
             upvalue = upvalue->next;
         }
+
+        // 3.调整 “大栈” 的栈顶 esp
+        objThread->esp += offset;
     }
 }
 
@@ -237,9 +237,8 @@ static void patchOperand(Class *class, ObjFn *fn) {
 
     while (true) {
         // 从头开始遍历字节码中的所有操作码
-        opCode = fn->instrStream.datas[ip];
         // 指向操作数的第一个字节（操作数占用的字节数可能是 0个、1个、4个 等）
-        ip++;
+        opCode = (OpCode)fn->instrStream.datas[ip++];
 
         switch (opCode) {
             case OPCODE_LOAD_FIELD:
@@ -250,9 +249,7 @@ static void patchOperand(Class *class, ObjFn *fn) {
                 // 当编译子类时，基类可能还未编译，所以需要等到编译阶段完全结束后，
                 // 在子类本身的实例属性数量的基础上在加上基类本身的实例属性数量
                 // 该操作数表示子类的实例属性数量，只有一个字节
-                fn->instrStream.datas[ip] += class->superClass->fieldNum;
-                // 指向下一个操作码
-                ip++;
+                fn->instrStream.datas[ip++] += class->superClass->fieldNum;
                 break;
             }
 
@@ -329,7 +326,7 @@ static void patchOperand(Class *class, ObjFn *fn) {
 // 为了保证一样长度，就需要将各个类的 methods 数组中无用的索引处用空占位填充
 
 // 修正方法对应指令流中的操作数且绑定方法到指定类上
-static void bindMethodAndPath(VM *vm, OpCode opCode, Class *class, uint32_t methodIndex, Value methodValue) {
+static void bindMethodAndPatch(VM *vm, OpCode opCode, Class *class, uint32_t methodIndex, Value methodValue) {
     // 类的静态方法由【类的 meta 类】的 methods 数组来存储
     // 类的实例方法由【类本身】的 methods 数组来存储
     if (opCode == OPCODE_STATIC_METHOD) {
@@ -450,6 +447,7 @@ loopStart:
             // 注意：cu->localVars 只是保存局部变量的名，局部变量的值是保存在运行时栈中的
             stackStart[READ_BYTE()] = PEEK();
             goto loopStart;
+
         case OPCODE_CALL0:
         case OPCODE_CALL1:
         case OPCODE_CALL2:
@@ -565,7 +563,7 @@ loopStart:
                     break;
 
                 default:
-                    NOT_REACHED
+                    NOT_REACHED()
             }
 
             goto loopStart;
@@ -691,7 +689,7 @@ loopStart:
                     break;
 
                 default:
-                    NOT_REACHED
+                    NOT_REACHED()
             }
 
             goto loopStart;
@@ -968,7 +966,7 @@ loopStart:
             Value method = PEEK2();
 
             // 将实例方法/静态方法绑定到指定类上
-            bindMethodAndPath(vm, opCode, class, methodNameIndex, method);
+            bindMethodAndPatch(vm, opCode, class, methodNameIndex, method);
 
             // 回收栈顶和次栈顶的空间
             DROP();
@@ -995,8 +993,6 @@ loopStart:
             // 然后将该函数引用的自由变量添加到该函数闭包的 upvalues 数组中
             uint32_t idx = 0;
             while (idx < objFn->upvalueNum) {
-                idx++;
-
                 uint8_t isEnclosingLocalVar = READ_BYTE();
                 uint8_t index = READ_BYTE();
 
@@ -1018,18 +1014,20 @@ loopStart:
                     // 当前就是在执行直接外层函数，所以 curFrame->closure->upvalues 就是直接外层函数的自由变量数组
                     objClosure->upvalues[idx] = curFrame->closure->upvalues[index];
                 }
+
+                idx++;
             }
 
             goto loopStart;
         }
 
         case OPCODE_END:
-            NOT_REACHED
+            NOT_REACHED()
 
         default:
-            NOT_REACHED
+            NOT_REACHED()
     }
-    NOT_REACHED
+    NOT_REACHED()
 
 #undef PUSH
 #undef POP

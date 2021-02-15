@@ -1,5 +1,4 @@
 #include "lexer.h"
-#include "class.h"
 #include "common.h"
 #include "obj_string.h"
 #include "unicodeUtf8.h"
@@ -12,7 +11,7 @@
 struct keywordToken {
     char *keyword;
     uint8_t length;
-    TokenType type;
+    TokenType token;
 };
 
 // 定义了关键字 Token 的数组，用于后面词法分析识别关键词时进行查找
@@ -48,7 +47,7 @@ static TokenType keywordOrId(const char *start, uint32_t length) {
         if (keywordsToken[idx].length == length &&
             memcmp(keywordsToken[idx].keyword, start, length) == 0) {
             // 找到则返回该 Token 的类型
-            return keywordsToken[idx].type;
+            return keywordsToken[idx].token;
         }
         idx++;
     }
@@ -57,24 +56,21 @@ static TokenType keywordOrId(const char *start, uint32_t length) {
     return TOKEN_ID;
 }
 
-// 用于获取下一个字符的内容
-static char getNextChar(Lexer *lexer) {
+// 向前看一个字符
+static char lookAheadChar(Lexer *lexer) {
     return *lexer->nextCharPtr;
 }
 
 // 用于更新词法分析器所指向的字符，读进下一个字符
-static void scanNextChar(Lexer *lexer) {
-    // 将 nextCharPtr 所指的字符赋给 curChar
-    lexer->curChar = *lexer->nextCharPtr;
-
-    // 然后 nextCharPtr 加 1，即指向下下个字符
-    lexer->nextCharPtr += 1;
+static void getNextChar(Lexer *lexer) {
+    // 将 nextCharPtr 所指的字符赋给 curChar，然后 nextCharPtr 加 1，即指向下下个字符
+    lexer->curChar = *lexer->nextCharPtr++;
 }
 
 // 匹配下一个字符，如果匹配则读进该字符并返回 true，否则直接返回 false
 static bool matchNextChar(Lexer *lexer, char expectedChar) {
-    if (getNextChar(lexer) == expectedChar) {
-        scanNextChar(lexer);
+    if (lookAheadChar(lexer) == expectedChar) {
+        getNextChar(lexer);
         return true;
     }
     return false;
@@ -86,69 +82,15 @@ static void skipBlanks(Lexer *lexer) {
         if (lexer->curChar == '\n') {
             lexer->curToken.lineNo++;
         }
-        scanNextChar(lexer);
-    }
-}
-
-// 跳过一行
-static void skipOneLine(Lexer *lexer) {
-    getNextChar(lexer);
-    while (lexer->curChar != '\0') {
-        if (lexer->curChar == '\n') {
-            lexer->curToken.lineNo++;
-            getNextChar(lexer);
-            break;
-        }
         getNextChar(lexer);
     }
 }
 
-// 跳过行注释和区块注释
-static void skipComment(Lexer *lexer) {
-    char nextChar = getNextChar(lexer);
-    if (lexer->curChar == '/') {
-        // 行注释
-        skipOneLine(lexer);
-    } else {
-        // 区块注释
-        // TODO: 该逻辑可能有 bug，当在注释中有 * 作为注释的内容时，
-        // 不应该简单的跳出循环，然后判断下一个字符是不是 /
-        // 后续完善
-        while (nextChar != '*' && nextChar != '\0') {
-            // 不停地读入注释中下一个字符
-            scanNextChar(lexer);
-
-            // 如果注释有换行，则更新 lineNo
-            // 主要是为了当某段代码报错时，能准确报出出错行数
-            if (lexer->curChar == '\n') {
-                lexer->curToken.lineNo++;
-            }
-            // 获取下一个字符，用作下一个循环的判断
-            nextChar = getNextChar(lexer);
-        }
-
-        // 循环退出后，下一个字符要么是 * 要么是 \0
-        // 如果下一个字符是 *，再判断下下个字符是不是 /
-        // 如果是，则说明注释结束，读取下个字符
-        if (matchNextChar(lexer, '*')) {
-            if (!matchNextChar(lexer, '/')) {
-                LEX_ERROR(lexer, "expect '/' after '*'!");
-            }
-            scanNextChar(lexer);
-        } else {
-            // 如果下一个字符是 \0，则报错
-            LEX_ERROR(lexer, "expect '*/' before comment end!");
-        }
-    }
-    // 注释之后可能会有空白符
-    skipBlanks(lexer);
-}
-
 // 解析关键字
-static void lexKeyword(Lexer *lexer, TokenType type) {
+static void lexId(Lexer *lexer, TokenType type) {
     // 判断当前字符 curChar 是否是字母/数字/_，如果是则继续读下个字符
     while (isalnum(lexer->curChar) || lexer->curChar == '_') {
-        scanNextChar(lexer);
+        getNextChar(lexer);
     }
 
     // 将指向下一个字符地址的 nextCharPtr 值减去 curToken 的 start 再减去 1（nextCharPtr 所指的字符不满足条件），即可得到当前读进的字符数
@@ -165,20 +107,82 @@ static void lexKeyword(Lexer *lexer, TokenType type) {
     }
 }
 
+// 解析十六进制数字
+static void lexHexNum(Lexer *lexer) {
+    // 判断当前字符是否是合法的十六进制数字
+    while (isxdigit(lexer->curChar)) {
+        getNextChar(lexer);
+    }
+}
+
+// 解析十进制数字
+static void lexDecNum(Lexer *lexer) {
+    // 判断当前字符是否是合法的十进制数字
+    while (isdigit(lexer->curChar)) {
+        getNextChar(lexer);
+    }
+
+    if (lexer->curChar == '.' && isdigit(lookAheadChar(lexer))) {
+        getNextChar(lexer);
+        while (isdigit(lexer->curChar)) {
+            // 遇到小数点，则跳过小数点解析后面的数字
+            getNextChar(lexer);
+        }
+    }
+}
+
+// 解析八进制数字
+static void lexOctNum(Lexer *lexer) {
+    // 判断当前字符是否是合法的八进制数字
+    while (lexer->curChar >= '0' && lexer->curChar < '8') {
+        getNextChar(lexer);
+    }
+}
+
+// 解析数字
+static void lexNum(Lexer *lexer) {
+    // 十六进制以 0x 开头
+    if (lexer->curChar == '0' && matchNextChar(lexer, 'x')) {
+        // 跳过 x
+        getNextChar(lexer);
+        // 解析十六进制数字
+        lexHexNum(lexer);
+        // strtol 方法是将 lexer->curToken.start 指向的字符串转成数字
+        // 第三个参数 16 表示是转成十六进制数字
+        // 第二个参数 NULL 表示不需要返回转换失败的字符串地址
+        lexer->curToken.value = NUM_TO_VALUE(strtol(lexer->curToken.start, NULL, 16));
+    } else if (lexer->curChar == '0' && isdigit(lookAheadChar(lexer))) {
+        // 解析八进制数字
+        lexOctNum(lexer);
+        // strtol 同上
+        lexer->curToken.value = NUM_TO_VALUE(strtol(lexer->curToken.start, NULL, 8));
+    } else {
+        // 解析十进制数字
+        lexDecNum(lexer);
+        // strtod 方法是将 lexer->curToken.start 指向的字符串转成十进制数字
+        // 第二个参数 NULL 表示不需要返回转换失败的字符串地址
+        lexer->curToken.value = NUM_TO_VALUE(strtod(lexer->curToken.start, NULL));
+    }
+
+    // nextCharPtr 会指向第一个不合法字符的下一个字符，所以需要再减 1
+    lexer->curToken.length = (uint32_t)(lexer->nextCharPtr - lexer->curToken.start - 1);
+    lexer->curToken.type = TOKEN_NUM;
+}
+
 // 解析 unicode 码点
 // 前置知识：
 // unicode 码点是 4 个十六进制数字，比如 “字” 的码点就是 0x5B57
 // 为了和数字区分，用转义字符 \u 做前缀，即 \u5B57
 // 该函数将 unicode 码点按照 UTF-8 编码然后写入制定缓冲区 buf 中
 static void lexUnicodeCodePoint(Lexer *lexer, ByteBuffer *buf) {
-    int value = 0;
     uint32_t idx = 0;
+    int value = 0;
     uint8_t digit = 0;
 
     // 循环的过程就是将十六进制转成十进制
     // 例如将 \u5B57 中的 5B57（十六进制）转成十进制 23383 (十进制)
-    while (idx < 4) {
-        scanNextChar(lexer);
+    while (idx++ < 4) {
+        getNextChar(lexer);
 
         // 先获取每一位数，然后转成十进制的数
         if (lexer->curChar == '\0') {
@@ -196,11 +200,10 @@ static void lexUnicodeCodePoint(Lexer *lexer, ByteBuffer *buf) {
         }
         // 将每一位的值转换成十进制后，累积到 value 中
         value = value * 16 | digit;
-        idx++;
     }
 
     // 根据转换成十进制的数值 value，计算其如果用 UTF-8 表示时，需要几个字节
-    uint32_t byteNum = getByteNumOfDecodeUtf8(value);
+    uint32_t byteNum = getByteNumOfEncodeUtf8(value);
     ASSERT(byteNum != 0, "utf8 encode byte number should be between 1 and 4");
 
     // 在真正将 value 写入 buf 之前，先写入 byteNum 个 0，以确保事先有 byteNum 个空间
@@ -219,7 +222,7 @@ static void lexString(Lexer *lexer) {
 
     while (true) {
         // 循环扫描下一个字符
-        scanNextChar(lexer);
+        getNextChar(lexer);
 
         // 如果在遇到右双引号 “"” 之前遇到字符串结束符 \0，说明字符串是不完整的
         if (lexer->curChar == '\0') {
@@ -258,7 +261,7 @@ static void lexString(Lexer *lexer) {
         // 当遇到 \ 说明可能遇到了转义字符，例如 \n，所以读取下个字符进一步确认
         // 之所以判断条件中是 '\\'，则是在 C 语言中也需要转义字符
         if (lexer->curChar == '\\') {
-            scanNextChar(lexer);
+            getNextChar(lexer);
             switch (lexer->curChar) {
                 case '0':
                     ByteBufferAdd(lexer->vm, &str, '\0');
@@ -307,73 +310,58 @@ static void lexString(Lexer *lexer) {
     ByteBufferClear(lexer->vm, &str);
 }
 
-// 解析八进制数字
-static void lexOctNum(Lexer *lexer) {
-    // 判断当前字符是否是合法的八进制数字
-    while (lexer->curChar >= '0' && lexer->curChar < '8') {
-        scanNextChar(lexer);
+// 跳过一行
+static void skipAline(Lexer *lexer) {
+    getNextChar(lexer);
+    while (lexer->curChar != '\0') {
+        if (lexer->curChar == '\n') {
+            lexer->curToken.lineNo++;
+            getNextChar(lexer);
+            break;
+        }
+        getNextChar(lexer);
     }
 }
 
-// 解析十六进制数字
-static void lexHexNum(Lexer *lexer) {
-    // 判断当前字符是否是合法的十六进制数字
-    while (isxdigit(lexer->curChar)) {
-        scanNextChar(lexer);
-    }
-}
+// 跳过行注释和区块注释
+static void skipComment(Lexer *lexer) {
+    char nextChar = lookAheadChar(lexer);
+    if (lexer->curChar == '/') {
+        // 行注释
+        skipAline(lexer);
+    } else {
+        // 区块注释
+        // TODO: 该逻辑可能有 bug，当在注释中有 * 作为注释的内容时，
+        // 不应该简单的跳出循环，然后判断下一个字符是不是 /
+        // 后续完善
+        while (nextChar != '*' && nextChar != '\0') {
+            // 不停地读入注释中下一个字符
+            getNextChar(lexer);
 
-// 解析十进制数字
-static void lexDecNum(Lexer *lexer) {
-    // 判断当前字符是否是合法的十进制数字
-    while (isdigit(lexer->curChar)) {
-        scanNextChar(lexer);
-    }
+            // 如果注释有换行，则更新 lineNo
+            // 主要是为了当某段代码报错时，能准确报出出错行数
+            if (lexer->curChar == '\n') {
+                lexer->curToken.lineNo++;
+            }
+            // 获取下一个字符，用作下一个循环的判断
+            nextChar = lookAheadChar(lexer);
+        }
 
-    if (lexer->curChar == '.' && isdigit(getNextChar(lexer))) {
-        scanNextChar(lexer);
-        while (isdigit(lexer->curChar)) {
-            // 遇到小数点，则跳过小数点解析后面的数字
-            scanNextChar(lexer);
+        // 循环退出后，下一个字符要么是 * 要么是 \0
+        // 如果下一个字符是 *，再判断下下个字符是不是 /
+        // 如果是，则说明注释结束，读取下个字符
+        if (matchNextChar(lexer, '*')) {
+            if (!matchNextChar(lexer, '/')) {
+                LEX_ERROR(lexer, "expect '/' after '*'!");
+            }
+            getNextChar(lexer);
+        } else {
+            // 如果下一个字符是 \0，则报错
+            LEX_ERROR(lexer, "expect '*/' before comment end!");
         }
     }
-}
-
-// 解析数字
-static void lexNum(Lexer *lexer) {
-    // 十六进制以 0x 开头
-    if (lexer->curChar == '0' && matchNextChar(lexer, 'x')) {
-        // 跳过 x
-        scanNextChar(lexer);
-        // 解析十六进制数字
-        lexHexNum(lexer);
-        // strtol 方法是将 lexer->curToken.start 指向的字符串转成数字
-        // 第三个参数 16 表示是转成十六进制数字
-        // 第二个参数 NULL 表示不需要返回转换失败的字符串地址
-        lexer->curToken.value =
-            NUM_TO_VALUE(strtol(lexer->curToken.start, NULL, 16));
-    }
-    // 八进制以 0 开头
-    else if (lexer->curChar == '0' && isdigit(getNextChar(lexer))) {
-        // 解析八进制数字
-        lexOctNum(lexer);
-        // strtol 同上
-        lexer->curToken.value =
-            NUM_TO_VALUE(strtol(lexer->curToken.start, NULL, 8));
-    }
-    // 十进制
-    else {
-        // 解析十进制数字
-        lexDecNum(lexer);
-        // strtod 方法是将 lexer->curToken.start 指向的字符串转成十进制数字
-        // 第二个参数 NULL 表示不需要返回转换失败的字符串地址
-        lexer->curToken.value =
-            NUM_TO_VALUE(strtod(lexer->curToken.start, NULL));
-    }
-
-    // nextCharPtr 会指向第一个不合法字符的下一个字符，所以需要再减 1
-    lexer->curToken.length = (uint32_t)(lexer->nextCharPtr - lexer->curToken.start - 1);
-    lexer->curToken.type = TOKEN_NUM;
+    // 注释之后可能会有空白符
+    skipBlanks(lexer);
 }
 
 // 获取 Token 方法
@@ -404,87 +392,6 @@ void getNextToken(Lexer *lexer) {
             case ':':
                 lexer->curToken.type = TOKEN_COLON;
                 break;
-            case '[':
-                lexer->curToken.type = TOKEN_LEFT_BRACKET;
-                break;
-            case ']':
-                lexer->curToken.type = TOKEN_RIGHT_BRACKET;
-                break;
-            case '{':
-                lexer->curToken.type = TOKEN_LEFT_BRACE;
-                break;
-            case '}':
-                lexer->curToken.type = TOKEN_RIGHT_BRACE;
-                break;
-            case '.':
-                // .. 用于便是范围，例如 1 2 3 4  可以用 1..4 表示
-                lexer->curToken.type = matchNextChar(lexer, '.') ? TOKEN_DOT_DOT : TOKEN_DOT;
-                break;
-            case '=':
-                lexer->curToken.type = matchNextChar(lexer, '=') ? TOKEN_EQUAL : TOKEN_ASSIGN;
-                break;
-            case '+':
-                lexer->curToken.type = TOKEN_ADD;
-                break;
-            case '-':
-                lexer->curToken.type = TOKEN_SUB;
-                break;
-            case '*':
-                lexer->curToken.type = TOKEN_MUL;
-                break;
-            case '%':
-                lexer->curToken.type = TOKEN_MOD;
-                break;
-            case '/':
-                if (matchNextChar(lexer, '/') || matchNextChar(lexer, '*')) {
-                    // 如果是注释，则调用跳过注释函数
-                    skipComment(lexer);
-                    // 跳过注释后，重置 curToken 的起始地址
-                    lexer->curToken.start = lexer->nextCharPtr - 1;
-                    // 开始下一个循环，不会执行下面的逻辑
-                    // 直到匹配到非注释的正常 TOKEN
-                    continue;
-                } else {
-                    lexer->curToken.type = TOKEN_DIV;
-                }
-                break;
-            case '&':
-                lexer->curToken.type = matchNextChar(lexer, '&') ? TOKEN_LOGIC_AND : TOKEN_BIT_AND;
-                break;
-            case '|':
-                lexer->curToken.type = matchNextChar(lexer, '|') ? TOKEN_LOGIC_OR : TOKEN_BIT_OR;
-                break;
-            case '~':
-                lexer->curToken.type = TOKEN_BIT_NOT;
-                break;
-            case '?':
-                lexer->curToken.type = TOKEN_QUESTION;
-                break;
-            case '!':
-                lexer->curToken.type = matchNextChar(lexer, '=') ? TOKEN_NOT_EQUAL : TOKEN_LOGIC_NOT;
-                break;
-            case '<':
-                if (matchNextChar(lexer, '=')) {
-                    lexer->curToken.type = TOKEN_LESS_EQUAL;
-                } else if (matchNextChar(lexer, '<')) {
-                    lexer->curToken.type = TOKEN_BIT_SHIFT_LEFT;
-                } else {
-                    lexer->curToken.type = TOKEN_LESS;
-                }
-                break;
-            case '>':
-                if (matchNextChar(lexer, '=')) {
-                    lexer->curToken.type = TOKEN_GREAT_EQUAL;
-                } else if (matchNextChar(lexer, '>')) {
-                    lexer->curToken.type = TOKEN_BIT_SHIFT_RIGHT;
-                } else {
-                    lexer->curToken.type = TOKEN_GREAT;
-                }
-                break;
-            case '"':
-                // 遇到 " 字符，则调用解析字符串的函数 lexString
-                lexString(lexer);
-                break;
             case '(':
                 // 如果 interpolationExpectRightParenNum 大于 0，说明遇到了内嵌表达式
                 // 即以 % 开头的 %()
@@ -514,13 +421,99 @@ void getNextToken(Lexer *lexer) {
                 }
                 lexer->curToken.type = TOKEN_RIGHT_PAREN;
                 break;
+            case '[':
+                lexer->curToken.type = TOKEN_LEFT_BRACKET;
+                break;
+            case ']':
+                lexer->curToken.type = TOKEN_RIGHT_BRACKET;
+                break;
+            case '{':
+                lexer->curToken.type = TOKEN_LEFT_BRACE;
+                break;
+            case '}':
+                lexer->curToken.type = TOKEN_RIGHT_BRACE;
+                break;
+            case '.':
+                // .. 用于便是范围，例如 1 2 3 4  可以用 1..4 表示
+                lexer->curToken.type = matchNextChar(lexer, '.') ? TOKEN_DOT_DOT : TOKEN_DOT;
+                break;
+            case '=':
+                lexer->curToken.type = matchNextChar(lexer, '=') ? TOKEN_EQUAL : TOKEN_ASSIGN;
+                break;
+            case '+':
+                lexer->curToken.type = TOKEN_ADD;
+                break;
+            case '-':
+                lexer->curToken.type = TOKEN_SUB;
+                break;
+            case '*':
+                lexer->curToken.type = TOKEN_MUL;
+                break;
+            case '/':
+                if (matchNextChar(lexer, '/') || matchNextChar(lexer, '*')) {
+                    // 如果是注释，则调用跳过注释函数
+                    skipComment(lexer);
+                    // 跳过注释后，重置 curToken 的起始地址
+                    lexer->curToken.start = lexer->nextCharPtr - 1;
+                    // 开始下一个循环，不会执行下面的逻辑
+                    // 直到匹配到非注释的正常 TOKEN
+                    continue;
+                } else {
+                    lexer->curToken.type = TOKEN_DIV;
+                }
+                break;
+            case '%':
+                lexer->curToken.type = TOKEN_MOD;
+                break;
+            case '&':
+                lexer->curToken.type = matchNextChar(lexer, '&') ? TOKEN_LOGIC_AND : TOKEN_BIT_AND;
+                break;
+            case '|':
+                lexer->curToken.type = matchNextChar(lexer, '|') ? TOKEN_LOGIC_OR : TOKEN_BIT_OR;
+                break;
+            case '~':
+                lexer->curToken.type = TOKEN_BIT_NOT;
+                break;
+            case '?':
+                lexer->curToken.type = TOKEN_QUESTION;
+                break;
+            case '>':
+                if (matchNextChar(lexer, '=')) {
+                    lexer->curToken.type = TOKEN_GREAT_EQUAL;
+                } else if (matchNextChar(lexer, '>')) {
+                    lexer->curToken.type = TOKEN_BIT_SHIFT_RIGHT;
+                } else {
+                    lexer->curToken.type = TOKEN_GREAT;
+                }
+                break;
+            case '<':
+                if (matchNextChar(lexer, '=')) {
+                    lexer->curToken.type = TOKEN_LESS_EQUAL;
+                } else if (matchNextChar(lexer, '<')) {
+                    lexer->curToken.type = TOKEN_BIT_SHIFT_LEFT;
+                } else {
+                    lexer->curToken.type = TOKEN_LESS;
+                }
+                break;
+            case '!':
+                lexer->curToken.type = matchNextChar(lexer, '=') ? TOKEN_NOT_EQUAL : TOKEN_LOGIC_NOT;
+                break;
+            case '"':
+                // 遇到 " 字符，则调用解析字符串的函数 lexString
+                lexString(lexer);
+                break;
             default:
                 // 如果首字符是字母或者 _ 则说明是变量名（包含保留的关键字）
                 if (isalpha(lexer->curChar) || lexer->curChar == '_') {
-                    lexKeyword(lexer, TOKEN_UNKNOWN);
+                    lexId(lexer, TOKEN_UNKNOWN);
                 } else if (isdigit(lexer->curChar)) {
                     lexNum(lexer);
                 } else {
+                    if (lexer->curChar == '#' && matchNextChar(lexer, '!')) {
+                        skipAline(lexer);
+                        lexer->curToken.start = lexer->nextCharPtr - 1; //重置下一个token起始地址
+                        continue;
+                    }
                     LEX_ERROR(lexer, "Not support char: \'%c\', quit.", lexer->curChar);
                 }
                 return;
@@ -529,7 +522,7 @@ void getNextToken(Lexer *lexer) {
         // 计算当前 Token 的长度
         lexer->curToken.length = (uint32_t)(lexer->nextCharPtr - lexer->curToken.start);
         // 读进下一个字符
-        scanNextChar(lexer);
+        getNextChar(lexer);
         return;
     }
 }
@@ -554,7 +547,6 @@ void assertCurToken(Lexer *lexer, TokenType expectTokenType, const char *errMsg)
 
 // 初始化词法分析器
 void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode, ObjModule *objModule) {
-    lexer->vm = vm;
     // 由于 sourceCode 未必源自文件
     // 当源码是直接输入的，则 file 只是个字符串
     lexer->file = file;
@@ -562,12 +554,13 @@ void initLexer(VM *vm, Lexer *lexer, const char *file, const char *sourceCode, O
     lexer->sourceCode = sourceCode;
     lexer->curChar = *lexer->sourceCode;
     lexer->nextCharPtr = lexer->sourceCode + 1;
-    lexer->curToken.start = NULL;
-    lexer->curToken.length = 0;
     lexer->curToken.lineNo = 1;
     lexer->curToken.type = TOKEN_UNKNOWN;
+    lexer->curToken.start = NULL;
+    lexer->curToken.length = 0;
     lexer->preToken = lexer->curToken;
     lexer->interpolationExpectRightParenNum = 0;
     // 当前正在解析的模块
+    lexer->vm = vm;
     lexer->curModule = objModule;
 }

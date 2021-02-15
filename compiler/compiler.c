@@ -317,7 +317,7 @@ uint32_t getBytesOfOperands(const Byte *instrStream, Value *constants, int ip) {
         }
 
         default:
-            NOT_REACHED
+            NOT_REACHED()
     }
 }
 
@@ -333,15 +333,6 @@ static void emitLoadConstant(CompileUnit *cu, Value constant) {
     int index = addConstant(cu, constant);
     // 2. 生成【将常量压入到运行时栈顶】的指令
     writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, index);
-}
-
-// 编译字面量（即常量，包括数字、字符串），即字面量的 nud 方法
-// 即在语法分析时，遇到常量时，就调用该 nud 方法直接生成将该常量添加到运行时栈的指令即可
-static void literal(CompileUnit *cu, bool canAssign UNUSED) {
-    // 是 preToken 的原因：
-    // 当进入到某个 token 的 led/nud 方法时，curToken 为该 led/nud 方法所属 token 的右边的 token
-    // 所以 led/nud 所属的 token 就是 preToken
-    emitLoadConstant(cu, cu->curLexer->preToken.value);
 }
 
 // 将方法的签名对象转化成字符串
@@ -458,7 +449,7 @@ static int declareLocalVar(CompileUnit *cu, const char *name, uint32_t length) {
     int idx = (int)cu->localVarNum - 1;
 
     while (idx >= 0) {
-        LocalVar *var = &(cu->localVars[idx]);
+        LocalVar *var = &cu->localVars[idx];
 
         // 当向前遍历时发现已经进入到父级作用域，则退出
         // 因为只需要检测同一个局部作用域下是否存在变量名冲突
@@ -565,7 +556,7 @@ static int addUpvalue(CompileUnit *cu, bool isEnclosingLocalVar, uint32_t index)
         if (cu->upvalues[idx].index == index && cu->upvalues[idx].isEnclosingLocalVar == isEnclosingLocalVar) {
             return idx;
         }
-        idx--;
+        idx++;
     }
 
     // 否则直接添加并返回索引
@@ -601,7 +592,7 @@ static int findUpvalue(CompileUnit *cu, const char *name, uint32_t length) {
     int directOuterLocalIndex = findLocalVar(cu->enclosingUnit, name, length);
     // 如果找到，则将 localVars 数组中对应变量的 isUpvalue 属性设置成 true，并将该变量添加到 cu->upvalues 数组中
     if (directOuterLocalIndex != -1) {
-        cu->localVars[directOuterLocalIndex].isUpvalue = true;
+        cu->enclosingUnit->localVars[directOuterLocalIndex].isUpvalue = true;
         // 由于是从直接外层编译单元的局部变量中找到，所以 isEnclosingLocalVar 为 true
         // 且 directOuterLocalIndex 为在直接外层编译单元的局部变量的索引
         return addUpvalue(cu, true, (uint32_t)directOuterLocalIndex);
@@ -687,7 +678,7 @@ static void emitLoadVariable(CompileUnit *cu, Variable var) {
             writeOpCodeShortOperand(cu, OPCODE_LOAD_MODULE_VAR, var.index);
             break;
         default:
-            NOT_REACHED
+            NOT_REACHED()
     }
 }
 
@@ -707,7 +698,7 @@ static void emitStoreVariable(CompileUnit *cu, Variable var) {
             writeOpCodeShortOperand(cu, OPCODE_STORE_MODULE_VAR, var.index);
             break;
         default:
-            NOT_REACHED
+            NOT_REACHED()
     }
 }
 
@@ -930,7 +921,7 @@ static void emitGetterMethodCall(CompileUnit *cu, Signature *sign, OpCode opCode
     // var a = A.new()
     // a.bar {|n| System.print(n)}
     // 其中 n 就是块参数（即传入的函数）的参数
-    if (matchToken(cu->curLexer, TOKEN_LEFT_BRACKET)) {
+    if (matchToken(cu->curLexer, TOKEN_LEFT_BRACE)) {
         // 参数加 1
         newSign.argNum++;
         // 设置成普通函数类型
@@ -1279,6 +1270,15 @@ static bool isLocalName(const char *name) {
     return (name[0] >= 'a' && name[0] <= 'z');
 }
 
+// 编译字面量（即常量，包括数字、字符串），即字面量的 nud 方法
+// 即在语法分析时，遇到常量时，就调用该 nud 方法直接生成将该常量添加到运行时栈的指令即可
+static void literal(CompileUnit *cu, bool canAssign UNUSED) {
+    // 是 preToken 的原因：
+    // 当进入到某个 token 的 led/nud 方法时，curToken 为该 led/nud 方法所属 token 的右边的 token
+    // 所以 led/nud 所属的 token 就是 preToken
+    emitLoadConstant(cu, cu->curLexer->preToken.value);
+}
+
 // 编译标识符的引用，即标识符的 nud 方法，
 // 调用该函数时preToken 为该标识符，curToken 为标识符右边的符号
 // 标识符可以是函数名、变量名、类静态属性、对象实例属性等
@@ -1350,6 +1350,10 @@ static void id(CompileUnit *cu, bool canAssign) {
             int fieldIndex = getIndexFromSymbolTable(&classBK->fields, name.start, name.length);
             // 如果找到
             if (fieldIndex != -1) {
+                if (classBK->isStatic) {
+                    COMPILE_ERROR(cu->curLexer, "instance field should not be used in static method!");
+                }
+
                 // 编辑是使用对象实例属性，还是给对象实例属性赋值
                 bool isRead = true;
                 // 如果是可赋值环境，且对象实例的属性后面的字符是等号，则说明是给对象实例属性进行赋值
@@ -1435,7 +1439,7 @@ static void id(CompileUnit *cu, bool canAssign) {
             // 最开始是按照函数调用形式来查找（判断条件中有判断后面的字符是否是 ‘(’）
             // 有些情况，函数是作为参数形式出现的，比如函数名作为创建线程的参数，例如 thread.new(函数名)
             // 所以重新以 “Fn 函数名” 的形式在当前模块的模块变量名字表 moduleVarName 中查找
-            char fnName[MAX_ID_LEN] = {'\0'};
+            char fnName[MAX_SIGN_LEN + 4] = {'\0'};
             memmove(fnName, "Fn ", 3);
             memmove(fnName + 3, name.start, name.length);
             var.index = getIndexFromSymbolTable(&cu->curLexer->curModule->moduleVarName, fnName, strlen(fnName));
@@ -1685,7 +1689,7 @@ static void callEntry(CompileUnit *cu, bool canAssign) {
 
 // 先用特殊的数值作为占位符，写入指令的操作数
 // 后续该操作数会被正确的偏移量复写
-static uint32_t emitIntstrWithPlaceholder(CompileUnit *cu, OpCode opCode) {
+static uint32_t emitInstrWithPlaceholder(CompileUnit *cu, OpCode opCode) {
     writeOpCode(cu, opCode);
     // 地址一般为 16 位，即两个字节，也就是操作数大小为两个字节
     // 根据大端字节序，高位地址存在内存的低地址端，低位地址存在内存的高地址端
@@ -1722,10 +1726,10 @@ static void patchPlaceHolder(CompileUnit *cu, uint32_t absIndex) {
 static void logicOr(CompileUnit *cu, bool canAssign UNUSED) {
     // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 || 的左操作数
 
-    // 编译 || 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
+    // 编译 || 符号，调用 emitInstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
     // 其中返回的 placeholderIndex 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 等到符号 || 的右操作数编译完之后，在将到右操作数编译得到的指令流结束地址的偏移量回填，替换占位符 0xffff
-    uint32_t placeholderIndex = emitIntstrWithPlaceholder(cu, OPCODE_OR);
+    uint32_t placeholderIndex = emitInstrWithPlaceholder(cu, OPCODE_OR);
 
     // 生成【计算符号 || 右边表达式结果】的指令流
     expression(cu, BP_LOGIC_OR);
@@ -1740,10 +1744,10 @@ static void logicOr(CompileUnit *cu, bool canAssign UNUSED) {
 static void logicAnd(CompileUnit *cu, bool canAssign UNUSED) {
     // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 && 的左操作数
 
-    // 编译 && 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
+    // 编译 && 符号，调用 emitInstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_OR，操作数是占位符 0xffff，
     // 其中返回的 placeholderIndex 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 等到符号 && 的右操作数编译完之后，在将到右操作数编译得到的指令流结束地址的偏移量回填，替换占位符 0xffff
-    uint32_t placeholderIndex = emitIntstrWithPlaceholder(cu, OPCODE_AND);
+    uint32_t placeholderIndex = emitInstrWithPlaceholder(cu, OPCODE_AND);
 
     // 生成【计算符号 && 右边表达式结果】的指令流
     expression(cu, BP_LOGIC_AND);
@@ -1759,12 +1763,12 @@ static void logicAnd(CompileUnit *cu, bool canAssign UNUSED) {
 static void condition(CompileUnit *cu, bool canAssign UNUSED) {
     // 执行此函数时，栈顶保存的就是条件表达式的结果，即符号 ? 的左操作数
 
-    // 编译 ? 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
+    // 编译 ? 符号，调用 emitInstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
     // 返回的 falseBranchStart 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 主要是用来保存该指令距离假分支的开始指令的偏移量
     // 用于当 condition 为 false 时，直接跳到假分支的开始指令执行
     // 等待真分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
-    uint32_t falseBranchStart = emitIntstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+    uint32_t falseBranchStart = emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
 
     // 编译真分支代码，即生成【计算真分支代码结果，并压入到运行时栈顶】的指令
     expression(cu, BP_LOWEST);
@@ -1772,12 +1776,12 @@ static void condition(CompileUnit *cu, bool canAssign UNUSED) {
     // 真分支后面必须为 : 符号
     assertCurToken(cu->curLexer, TOKEN_COLON, "expect ':' after true branch!");
 
-    // 编译 : 符号，调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP，操作数是占位符 0xffff，
+    // 编译 : 符号，调用 emitInstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP，操作数是占位符 0xffff，
     // 返回的 falseBranchEnd 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 主要是用来保存该指令距离假分支的结束指令的偏移量
     // 用于当 condition 为 true 时，执行完真分支的指令后，直接跳过假分支的指令，执行后面的指令
     // 等待假分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
-    uint32_t falseBranchEnd = emitIntstrWithPlaceholder(cu, OPCODE_JUMP);
+    uint32_t falseBranchEnd = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
 
     // 编译完真分支，知道了假分支的开始地址，回填 falseBranchStart
     patchPlaceHolder(cu, falseBranchStart);
@@ -1822,9 +1826,7 @@ static void condition(CompileUnit *cu, bool canAssign UNUSED) {
     }
 
 // 对于没有规则的符号，用 UNUSED_RULE 占位用的
-#define UNUSED_RULE \
-    {               \
-        NULL, BP_NONE, NULL, NULL, NULL}
+#define UNUSED_RULE {NULL, BP_NONE, NULL, NULL, NULL}
 
 // 符号绑定规则的数组
 // 按照 lexer.h 中定义的枚举 TokenType 中各种类型的 token 顺序，来添加对应的符号绑定规则
@@ -2088,24 +2090,24 @@ static void compileIfStatement(CompileUnit *cu) {
     expression(cu, BP_LOWEST);
     assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "missing ')' before '{' in if!");
 
-    // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
+    // 调用 emitInstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
     // 返回的 falseBranchStart 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 主要是用来保存该指令距离假分支的开始指令的偏移量
     // 用于当 condition 为 false 时，直接跳到假分支的开始指令执行
     // 等待真分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
-    uint32_t falseBranchStart = emitIntstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+    uint32_t falseBranchStart = emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
 
     // 编译真分支代码
     compileStatement(cu);
 
     if (matchToken(cu->curLexer, TOKEN_ELSE)) {
         // 如果有 else 分支
-        // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP，操作数是占位符 0xffff，
+        // 调用 emitInstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP，操作数是占位符 0xffff，
         // 返回的 falseBranchEnd 就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
         // 主要是用来保存该指令距离假分支的结束指令的偏移量
         // 用于当 condition 为 true 时，执行完真分支的指令后，直接跳过假分支的指令，执行后面的指令
         // 等待假分支编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
-        uint32_t falseBranchEnd = emitIntstrWithPlaceholder(cu, OPCODE_JUMP);
+        uint32_t falseBranchEnd = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
 
         // 编译完真分支，知道了假分支的开始地址，回填 falseBranchStart
         patchPlaceHolder(cu, falseBranchStart);
@@ -2183,7 +2185,7 @@ static void leaveLoopSetting(CompileUnit *cu) {
         } else {
             // 如果该指令不是操作码为 OPCODE_JUMP 的指令，则指向下一个指令
             // 当前指令大小 = 操作码大小（1 个字节） + getBytesOfOperands 获取到的操作数的大小
-            idx = 1 + getBytesOfOperands(cu->fn->instrStream.datas, cu->fn->constants.datas, idx);
+            idx += 1 + getBytesOfOperands(cu->fn->instrStream.datas, cu->fn->constants.datas, idx);
         }
     }
 
@@ -2206,12 +2208,12 @@ static void compileWhileStatement(CompileUnit *cu) {
 
     assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after condition!");
 
-    // 调用 emitIntstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
+    // 调用 emitInstrWithPlaceholder 函数写入指令，其中操作码为 OPCODE_JUMP_IF_FALSE，操作数是占位符 0xffff，
     // 该函数返回的值就是该指令的操作数中用于保存高位地址的低地址端字节地址（操作数有两个字节，其中低地址端字节保存值的是高位）
     // 主要是用来保存 该指令 距离 循环体的对应的指令流中的结束指令地址 的的偏移量
     // 用于当 condition 为 false 时，直接跳过循环体的指令流，执行其后面的指令
     // 等待循环体编译成指令后，就会调用 patchPlaceHolder 函数将真正的偏移量回填，替换占位符 0xffff
-    loop.exitIndex = emitIntstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+    loop.exitIndex = emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
 
     // 编译循环体
     compileLoopBody(cu);
@@ -2251,7 +2253,7 @@ inline static void compileBreak(CompileUnit *cu) {
     // 等到整个循环体编译完成后，会遍历对应指令流，找到操作码为 OPCODE_END 的指令，
     // 将操作码 OPCODE_END 替换为 OPCODE_JUMP，操作数替换成当前指令到循环体对应指令流的结尾指令的偏移量（相关逻辑在 leaveLoopSetting 函数中）
     // 所以不用返回需要回填的地址（即保存偏移量的地址，也就是 OPCODE_END 操作数中的高位字节地址），因为 leaveLoopSetting 中会遍历，遍历的时候会得到地址
-    emitIntstrWithPlaceholder(cu, OPCODE_END);
+    emitInstrWithPlaceholder(cu, OPCODE_END);
 }
 
 // 编译 continue 语句
@@ -2470,21 +2472,22 @@ static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic) {
 
     // 定义方法
     // 即将索引 methodIndex 对应的方法闭包存储到变量 classVar 指向的类的 class->methods[methodIndex] 中，methodIndex 就是该方法名在 vm->allMethodNames 中的索引
-    defineMethod(cu, classVar, isStatic, methodIndex);
+    defineMethod(cu, classVar, cu->enclosingClassBK->isStatic, methodIndex);
 
     // 针对类定义中的实例方法 new 方法，经过上面的处理会被编译成实例方法
     // 需要在实例方法 new 方法基础上再创建一个类的静态方法 new，以供类直接调用生成对象实例，该静态方法 new 方法中最终也是会调用之前的实例方法 new 方法
     // 详细逻辑请参考上面的 emitCreateInstance 方法
     if (sign.type == SIGN_CONSTRUCT) {
-        // 生成【创建对象实例】的方法，并将该方法闭包压入到运行时栈顶，等待下面被定义为类的静态方法 new
-        emitCreateInstance(cu, &sign, methodIndex);
-
         // 改变方法类型并重新生成方法签名和对应的字符串形式
         sign.type = SIGN_METHOD;
         char signatureString2[MAX_SIGN_LEN] = {'\0'};
-        uint32_t signLen2 = strlen(signatureString2);
+        uint32_t signLen2 = sign2String(&sign, signatureString2);
+
         // 确保该方法签名在 vm->allMethodNames 存在，不存在的话会直接插入并返回其索引，存在的话直接返回索引
         uint32_t constructorIndex = ensureSymbolExist(cu->curLexer->vm, &cu->curLexer->vm->allMethodNames, signatureString2, signLen2);
+
+        // 生成【创建对象实例】的方法，并将该方法闭包压入到运行时栈顶，等待下面被定义为类的静态方法 new
+        emitCreateInstance(cu, &sign, methodIndex);
 
         // 定义新创建的类的静态方法 new
         // 此时栈顶为【创建对象实例】的方法闭包
@@ -2564,11 +2567,13 @@ static void compileClassDefinition(CompileUnit *cu) {
     int fieldNumIndex = writeOpCodeByteOperand(cu, OPCODE_CREATE_CLASS, 255);
 
     // 到此，栈顶就保存了创建好的类
-    // 生成【把栈顶的类存储到 curModule->moduleVarValue 中，索引为 classVar.index（即和类名在 curModule->moduleVarName 中的索引相同）】的指令
-    // 也就是变量名储存在 curModule->moduleVarName 中，变量值存储在 curModule->moduleVarValue 中，两者在各个表中的索引相同
-    writeOpCodeShortOperand(cu, OPCODE_STORE_MODULE_VAR, classVar.index);
-    // 将栈顶的创建好的类弹出
-    writeOpCode(cu, OPCODE_POP);
+    if (cu->scopeDepth == -1) {
+        // 生成【把栈顶的类存储到 curModule->moduleVarValue 中，索引为 classVar.index（即和类名在 curModule->moduleVarName 中的索引相同）】的指令
+        // 也就是变量名储存在 curModule->moduleVarName 中，变量值存储在 curModule->moduleVarValue 中，两者在各个表中的索引相同
+        writeOpCodeShortOperand(cu, OPCODE_STORE_MODULE_VAR, classVar.index);
+        // 将栈顶的创建好的类弹出
+        writeOpCode(cu, OPCODE_POP);
+    }
 
     // 初始化 ClassBookKeep 结构
     // classBK 用于在编译类时跟踪类信息
@@ -2616,6 +2621,24 @@ static void compileClassDefinition(CompileUnit *cu) {
 }
 
 // 编译 fun 关键字形式的函数定义
+// 本语言完全面向对象,
+// (一)
+//    函数定义的形式是:
+//       var function = Fn.new {|形参|
+//          函数体代码
+//       }
+//    Fn.new返回的是{}内函数的闭包
+
+//    函数调用的形式是"函数闭包.call(...)"
+
+//    但是传统上
+// (二)
+//    函数定义的形式是:
+//       function 函数名(形参) {
+//          函数体代码
+//       }
+//    函数调用形式是:
+//       函数名(实参)
 static void compileFunctionDefinition(CompileUnit *cu) {
     // 执行此函数时已经读入了 fun 关键字
 
@@ -2629,9 +2652,9 @@ static void compileFunctionDefinition(CompileUnit *cu) {
 
     // 在模块变量中声明函数名
     // 为了和模块中自定义的变量做区分，在函数名前面添加 Fn 前缀，即 'Fn xxx\0'
-    char fnName[MAX_METHOD_NAME_LEN + 4] = {'\0'};
+    char fnName[MAX_SIGN_LEN + 4] = {'\0'};
     memmove(fnName, "Fn ", 3);
-    memmove(fnName + 3, cu->curLexer->curToken.start, cu->curLexer->curToken.length);
+    memmove(fnName + 3, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
     uint32_t fnNameIndex = declareVariable(cu, fnName, strlen(fnName));
 
     // 初始化函数编译单元 fnCU，用于存储编译函数得到的指令流
@@ -2686,8 +2709,21 @@ static void compileImport(CompileUnit *cu) {
     // import 后面需要为模块名，即 token 类型为 TOKEN_ID
     assertCurToken(cu->curLexer, TOKEN_ID, "expect module name after export!");
 
+    // 备份模块名token
+    Token moduleNameToken = cu->curLexer->preToken;
+
+    // 导入时模块的扩展名不需要，有可能用户会把模块的扩展名加上
+    // 比如 import hello.di，这时候就要跳过扩展名
+    if (cu->curLexer->preToken.start[cu->curLexer->preToken.length] == '.') {
+        printf("\n warning!!! the imported module doesn't need extension!, compiler try to ignor it!\n");
+
+        // 跳过扩展名
+        getNextToken(cu->curLexer); // 跳过 '.'
+        getNextToken(cu->curLexer); // 跳过 'di'
+    }
+
     // 将模块名转为字符串
-    ObjString *moduleName = newObjString(cu->curLexer->vm, cu->curLexer->preToken.start, cu->curLexer->preToken.length);
+    ObjString *moduleName = newObjString(cu->curLexer->vm, moduleNameToken.start, moduleNameToken.length);
 
     // 将模块名转化后的字符串作为变量添加到编译单元的 fn->constants 中
     uint32_t constModIdx = addConstant(cu, OBJ_TO_VALUE(moduleName));
