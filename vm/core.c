@@ -636,7 +636,7 @@ static bool primThreadNew(VM *vm, Value *args) {
         return false;
     }
 
-    ObjThread *objThread = newObjThread(vm, VALUE_TO_OBJCLOSURE(args[0]));
+    ObjThread *objThread = newObjThread(vm, VALUE_TO_OBJCLOSURE(args[1]));
 
     // 使stack[0]为接收者,保持栈平衡
     objThread->stack[0] = VT_TO_VALUE(VT_NULL);
