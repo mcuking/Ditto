@@ -1233,6 +1233,88 @@ static bool primStringToString(VM *vm UNUSED, Value *args) {
     RET_VALUE(args[0])
 }
 
+// 返回下一个 UTF-8 字符 (不是字节) 的迭代器
+// 该方法是脚本中调用 objString.iterate(_) 所执行的原生方法，该方法为实例方法
+static bool primStringIterate(VM *vm UNUSED, Value *args) {
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+
+    // 如果是第一次迭代，迭代索引肯定为空
+    if (VALUE_IS_NULL(args[1])) {
+        if (objString->value.length == 0) {
+            RET_FALSE
+        }
+        RET_NUM(0)
+    }
+
+    // 迭代器必须是正整数
+    if (!validateInt(vm, args[1])) {
+        return false;
+    }
+
+    double iter = VALUE_TO_NUM(args[1]);
+    if (iter < 0) {
+        RET_FALSE
+    }
+
+    uint32_t index = (uint32_t)iter;
+    do {
+        index++;
+
+        // 到了结尾就返回 false，表示迭代完毕
+        if (index >= objString->value.length)
+            RET_FALSE
+
+        // 读取连续的数据字节，直到下一个 UTF-8 的高字节
+    } while ((objString->value.start[index] & 0xc0) == 0x80);
+
+    RET_NUM(index)
+}
+
+// 迭代索引，内部使用
+// 该方法是脚本中调用 objString.iterateByte_(_) 所执行的原生方法，该方法为实例方法
+static bool primStringIterateByte(VM *vm UNUSED, Value *args) {
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+
+    // 如果是第一次迭代，迭代索引肯定为空，直接返回索引 0
+    if (VALUE_IS_NULL(args[1])) {
+        if (objString->value.length == 0) {
+            RET_FALSE
+        }
+        RET_NUM(0)
+    }
+
+    // 迭代器必须是正整数
+    if (!validateInt(vm, args[1])) {
+        return false;
+    }
+
+    double iter = VALUE_TO_NUM(args[1]);
+
+    if (iter < 0) {
+        RET_FALSE
+    }
+
+    uint32_t index = (uint32_t)iter;
+    // 移进到下一个字节的索引
+    index++;
+    if (index >= objString->value.length) {
+        RET_FALSE
+    }
+
+    RET_NUM(index)
+}
+
+// 返回迭代器对应的value
+// 该方法是脚本中调用 objString.iteratorValue(_) 所执行的原生方法，该方法为实例方法
+static bool primStringIteratorValue(VM *vm, Value *args) {
+    ObjString *objString = VALUE_TO_OBJSTR(args[0]);
+    uint32_t index = validateIndex(vm, args[1], objString->value.length);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+    RET_VALUE(stringCodePointAt(vm, objString, index))
+}
+
 /**
  * List 类的原生方法
 **/
@@ -1835,6 +1917,9 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->stringClass, "endsWith(_)", primStringEndsWith)
     PRIM_METHOD_BIND(vm->stringClass, "toString", primStringToString)
     PRIM_METHOD_BIND(vm->stringClass, "count", primStringByteCount)
+    PRIM_METHOD_BIND(vm->stringClass, "iterate(_)", primStringIterate)
+    PRIM_METHOD_BIND(vm->stringClass, "iterateByte_(_)", primStringIterateByte)
+    PRIM_METHOD_BIND(vm->stringClass, "iteratorValue(_)", primStringIteratorValue)
 
     /* List 类定义在 core.script.inc，将其挂载到 vm->listClass，并绑定原生方法 */
     vm->listClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "List"));
