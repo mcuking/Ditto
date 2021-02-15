@@ -1234,7 +1234,7 @@ static bool primStringToString(VM *vm UNUSED, Value *args) {
 }
 
 // 返回下一个 UTF-8 字符 (不是字节) 的迭代器
-// 该方法是脚本中调用 objString.iterate(_) 所执行的原生方法，该方法为实例方法
+// 该方法是脚本中调用 objString.iterate(args[1]) 所执行的原生方法，该方法为实例方法
 static bool primStringIterate(VM *vm UNUSED, Value *args) {
     ObjString *objString = VALUE_TO_OBJSTR(args[0]);
 
@@ -1271,7 +1271,7 @@ static bool primStringIterate(VM *vm UNUSED, Value *args) {
 }
 
 // 迭代索引，内部使用
-// 该方法是脚本中调用 objString.iterateByte_(_) 所执行的原生方法，该方法为实例方法
+// 该方法是脚本中调用 objString.iterateByte_(args[1]) 所执行的原生方法，该方法为实例方法
 static bool primStringIterateByte(VM *vm UNUSED, Value *args) {
     ObjString *objString = VALUE_TO_OBJSTR(args[0]);
 
@@ -1305,7 +1305,7 @@ static bool primStringIterateByte(VM *vm UNUSED, Value *args) {
 }
 
 // 返回迭代器对应的value
-// 该方法是脚本中调用 objString.iteratorValue(_) 所执行的原生方法，该方法为实例方法
+// 该方法是脚本中调用 objString.iteratorValue(args[1]) 所执行的原生方法，该方法为实例方法
 static bool primStringIteratorValue(VM *vm, Value *args) {
     ObjString *objString = VALUE_TO_OBJSTR(args[0]);
     uint32_t index = validateIndex(vm, args[1], objString->value.length);
@@ -1449,6 +1449,48 @@ static bool primListCount(VM *vm UNUSED, Value *args) {
     ObjList *objList = VALUE_TO_OBJLIST(args[0]);
     RET_NUM(objList->elements.count)
 }
+
+// 迭代 list 中的元素
+// 该方法是脚本中调用 objList.iterate(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primListIterate(VM *vm, Value *args) {
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+
+    // 如果是第一次迭代，迭代索引肯定为空，直接返回索引0
+    if (VALUE_IS_NULL(args[1])) {
+        if (objList->elements.count == 0) {
+            RET_FALSE
+        }
+        RET_NUM(0)
+    }
+
+    // 确保迭代器是整数
+    if (!validateInt(vm, args[1])) {
+        return false;
+    }
+
+    double iter = VALUE_TO_NUM(args[1]);
+    // 如果迭代完了就终止
+    if (iter < 0 || iter >= objList->elements.count - 1) {
+        RET_FALSE
+    }
+    //返回下一个
+    RET_NUM(iter + 1)
+}
+
+// 返回迭代值
+// 该方法是脚本中调用 objList.iteratorValue(args[1]) 所执行的原生方法，该方法为实例方法
+static bool primListIteratorValue(VM *vm, Value *args) {
+    //获取实例对象
+    ObjList *objList = VALUE_TO_OBJLIST(args[0]);
+
+    uint32_t index = validateIndex(vm, args[1], objList->elements.count);
+    if (index == UINT32_MAX) {
+        return false;
+    }
+
+    RET_VALUE(objList->elements.datas[index])
+}
+
 
 /**
  * Map 类的原生方法
@@ -1934,6 +1976,8 @@ void buildCore(VM *vm) {
     PRIM_METHOD_BIND(vm->listClass, "removeAt(_)", primListRemoveAt)
     PRIM_METHOD_BIND(vm->listClass, "clear()", primListClear)
     PRIM_METHOD_BIND(vm->listClass, "count", primListCount)
+    PRIM_METHOD_BIND(vm->listClass, "iterate(_)", primListIterate)
+    PRIM_METHOD_BIND(vm->listClass, "iteratorValue(_)", primListIteratorValue)
 
     /* Map 类定义在 core.script.inc，将其挂载到 vm->mapClass，并绑定原生方法 */
     vm->mapClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Map"));
