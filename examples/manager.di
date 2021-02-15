@@ -10,9 +10,9 @@ System.print(Employee.employeeNum)
 class Manager < Employee {
    var bonus
    bonus=(v) {
-      bonus = v 
+      bonus = v
    }
-   
+
    new(n, g, a, s, b) {
       super(n, g, a, s)
       bonus = b
@@ -32,18 +32,27 @@ fun employeeInfo() {
    employeeTitle["lw"] = "manager"
    employeeTitle["lz"] = "pm"
 
+   for k (employeeTitle.keys) {
+      System.print(k + " -> " + employeeTitle[k])
+   }
+
    var employeeHeight = {
-      "xh": 170, 
+      "xh": 170,
       "xm": 172,
       "lw": 168,
       "lz": 173
    }
    var totalHeight = 0
-
+   for v (employeeHeight.values) {
+      totalHeight = totalHeight + v
+   }
    System.print("averageHeight: %(totalHeight / employeeHeight.count)")
 
    var allEmployee = ["xh", "xm", "lw", "lz"]
-     
+   for e (allEmployee) {
+      System.print(e)
+   }
+
    allEmployee.add("xl")
    System.print("all employee are:%(allEmployee.toString)")
    var idx = 0
@@ -53,7 +62,7 @@ fun employeeInfo() {
       idx = idx + 1
    }
 
-   // System.gc()
+   // System.gc()  //可以手动回收内存
 
    var a = 3 + 5 > 9 - 3  ? "yes" : "no"
    if (a.endsWith("s")) {
