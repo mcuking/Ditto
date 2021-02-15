@@ -1977,6 +1977,27 @@ static void expression(CompileUnit *cu, BindPower rbp) {
     }
 }
 
+// 进入内嵌作用域
+static void enterScope(CompileUnit *cu) {
+    cu->scopeDepth++;
+}
+
+// 退出作用域
+static void leaveScope(CompileUnit *cu) {
+    if (cu->enclosingUnit != NULL) {
+        // 如果不是模块编译单元，则需要丢弃该作用域下的局部变量
+        // 因为模块编译单元的作用域作为顶级作用域不能退出，确保类的静态属性得以保留
+        uint32_t discardNum = discardLocalVar(cu, cu->scopeDepth);
+        // 该编译单元的局部变量数量减去 discardNum
+        cu->localVarNum -= discardNum;
+        // 该编译单元内所有指令对运行时栈的最终影响减去 discardNum
+        cu->stackSlotNum -= discardNum;
+    }
+    // 回到上一层作用域
+    cu->scopeDepth--;
+}
+
+
 // 编译变量定义
 // 注意：变量定义不支持一次定义多个变量，例如 var a, b;
 // isStatic 表示是否是类的静态属性
@@ -2222,6 +2243,85 @@ static void compileWhileStatement(CompileUnit *cu) {
     leaveLoopSetting(cu);
 }
 
+// 编译 for 循环语句
+//  for 循环会按照while循环的逻辑编译
+//  for i (sequence) {
+//      System.print(i)
+//  }
+//  其中 sequence 是可迭代的序列
+//  在内部会变成:
+//  var seq = sequence
+//  var iter
+//  while iter = seq.iterate(iter) {
+//      var i = seq.iteratorValue(iter)
+//      System.print(i)
+//  }
+static void compileForStatement(CompileUnit *cu) {
+    // 为局部变量 seq 和 iter 创建作用域
+    enterScope(cu);
+
+    // 读取循环变量的名字，如 "for i (sequence)" 中的 i
+    assertCurToken(cu->curLexer, TOKEN_ID, "expect variable after for!");
+    const char *loopVarName = cu->curLexer->preToken.start;
+    uint32_t loopVarLen = cu->curLexer->preToken.length;
+
+    assertCurToken(cu->curLexer, TOKEN_LEFT_PAREN, "expect '(' before sequence!");
+
+    // 编译迭代序列
+    expression(cu, BP_LOWEST);
+    assertCurToken(cu->curLexer, TOKEN_RIGHT_PAREN, "expect ')' after sequence!");
+    // 申请局部变量 seq 来存储序列对象，其值就是上面 expression 存储到栈中的结果
+    uint32_t seqSlot = addLocalVar(cu, "seq ", 4);
+
+    writeOpCode(cu, OPCODE_PUSH_NULL);
+    // 分配及初始化 iter，其值就是上面加载到栈中的的 NULL
+    uint32_t iterSlot = addLocalVar(cu, "iter ", 5);
+
+    Loop loop;
+    enterLoopSetting(cu, &loop);
+
+    // 为调用 "seq.iterate(iter)" 做准备
+    // 1. 先压入序列对象 seq，即 "seq.iterate(iter)" 中的seq
+    writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, seqSlot);
+    // 2. 再压入参数 iter，即 "seq.iterate(iter)" 中的iter
+    writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, iterSlot);
+    // 3. 调用 "seq.iterate(iter)"
+    emitCall(cu,  "iterate(_)", 10, 1);
+
+    // "seq.iterate(iter)" 把结果(下一个迭代器)存储到
+    // args[0](即栈顶)，现在将其同步到变量iter
+    writeOpCodeByteOperand(cu, OPCODE_STORE_LOCAL_VAR, iterSlot);
+
+    // 如果条件失败则跳出循环体，目前不知道循环体的结束地址，
+    // 先写入占位符.
+    loop.exitIndex = emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+
+    // 调用 "seq.iteratorValue(iter)" 以获取值
+    // 1. 为调用 "seq.iteratorValue(iter)" 压入参数 seq
+    writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, seqSlot);
+    // 2. 为调用 "seq.iteratorValue(iter)" 压入参数 iter
+    writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, iterSlot);
+    // 3. 调用 "seq.iteratorValue(iter)"
+    emitCall(cu, "iteratorValue(_)", 16, 1);
+
+    // 为循环变量 i 创建作用域
+    enterScope(cu);
+    // "seq.iteratorValue(iter)" 已经把结果存储到栈顶，
+    // 添加循环变量为局部变量，其值在栈顶
+    addLocalVar(cu, loopVarName, loopVarLen);
+
+    // 编译循环体
+    compileLoopBody(cu);
+
+    //离开循环变量 i 的作用域
+    leaveScope(cu);
+
+    leaveLoopSetting(cu);
+
+    //离开变量 seq 和 iter 的作用域
+    leaveScope(cu);
+}
+
 // 编译 return 语句
 inline static void compileReturn(CompileUnit *cu) {
     // 执行此函数时已经读入了 return，即 preToken 为 return
@@ -2274,26 +2374,6 @@ inline static void compileContinue(CompileUnit *cu) {
     writeOpCodeShortOperand(cu, OPCODE_LOOP, loopBackOffset);
 }
 
-// 进入内嵌作用域
-static void enterScope(CompileUnit *cu) {
-    cu->scopeDepth++;
-}
-
-// 退出作用域
-static void leaveScope(CompileUnit *cu) {
-    if (cu->enclosingUnit != NULL) {
-        // 如果不是模块编译单元，则需要丢弃该作用域下的局部变量
-        // 因为模块编译单元的作用域作为顶级作用域不能退出，确保类的静态属性得以保留
-        uint32_t discardNum = discardLocalVar(cu, cu->scopeDepth);
-        // 该编译单元的局部变量数量减去 discardNum
-        cu->localVarNum -= discardNum;
-        // 该编译单元内所有指令对运行时栈的最终影响减去 discardNum
-        cu->stackSlotNum -= discardNum;
-    }
-    // 回到上一层作用域
-    cu->scopeDepth--;
-}
-
 // 编译语句
 // 代码分为两种：
 // 1. 定义：生命数据的代码，例如定义变量、定义函数、定义类
@@ -2303,6 +2383,8 @@ static void compileStatement(CompileUnit *cu) {
         compileIfStatement(cu);
     } else if (matchToken(cu->curLexer, TOKEN_WHILE)) {
         compileWhileStatement(cu);
+    } else if (matchToken(cu->curLexer, TOKEN_FOR)) {
+        compileForStatement(cu);
     } else if (matchToken(cu->curLexer, TOKEN_RETURN)) {
         compileReturn(cu);
     } else if (matchToken(cu->curLexer, TOKEN_BREAK)) {
